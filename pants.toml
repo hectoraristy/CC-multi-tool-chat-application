@@ -1,0 +1,38 @@
+[GLOBAL]
+pants_version = "2.23.0"
+backend_packages = [
+    "pants.backend.python",
+    "pants.backend.python.lint.black",
+    "pants.backend.python.lint.isort",
+    "pants.backend.python.typecheck.mypy",
+    "pants.backend.docker",
+    "pants.backend.shell",
+    "pants.backend.shell.lint.shfmt",
+]
+
+[python]
+interpreter_constraints = ["CPython>=3.11,<3.13"]
+
+[python-infer]
+use_rust_parser = true
+
+[source]
+root_patterns = [
+    "backend/src",
+    "backend/tests",
+]
+
+[test]
+use_coverage = true
+
+[coverage-py]
+interpreter_constraints = ["CPython>=3.11,<3.13"]
+
+[docker]
+build_args = []
+
+[black]
+config = "pyproject.toml"
+
+[isort]
+config = ["pyproject.toml"]
