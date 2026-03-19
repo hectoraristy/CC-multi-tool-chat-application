@@ -1,5 +1,3 @@
-"""LangGraph agent definition — wires together the agent, tool, and summarize nodes."""
-
 from __future__ import annotations
 
 from langchain_core.messages import BaseMessage
@@ -26,7 +24,6 @@ SYSTEM_PROMPT = (
 
 
 def _agent_node(state: AgentState) -> dict[str, list[BaseMessage]]:
-    """Invoke the LLM with the current messages and bound tools."""
     llm = create_llm()
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
@@ -42,7 +39,6 @@ def _agent_node(state: AgentState) -> dict[str, list[BaseMessage]]:
 
 
 def _route_after_agent(state: AgentState) -> str:
-    """Route based on whether the agent wants to call a tool."""
     last = state["messages"][-1]
     if hasattr(last, "tool_calls") and last.tool_calls:
         return "tools"
@@ -50,7 +46,6 @@ def _route_after_agent(state: AgentState) -> str:
 
 
 def build_graph() -> StateGraph:
-    """Construct and compile the agent graph."""
     tool_node = ToolNode(ALL_TOOLS)
 
     graph = StateGraph(AgentState)

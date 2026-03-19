@@ -1,5 +1,3 @@
-"""Graph nodes for the multi-tool chat agent."""
-
 from __future__ import annotations
 
 import logging
@@ -19,7 +17,6 @@ SUMMARIZE_SYSTEM_PROMPT = (
 
 
 def should_summarize(state: AgentState) -> str:
-    """Conditional edge: route to 'summarize' if the last tool result is too large."""
     messages = state["messages"]
     if not messages:
         return "agent"
@@ -42,7 +39,6 @@ def should_summarize(state: AgentState) -> str:
 
 
 def summarize_node(state: AgentState) -> dict[str, list[BaseMessage]]:
-    """Summarize an oversized tool result and replace it in the message list."""
     from agent.llm_factory import create_llm
 
     messages = state["messages"]
