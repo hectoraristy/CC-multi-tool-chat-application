@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException
 
 from api.models import (
@@ -68,17 +70,26 @@ def get_messages(session_id: str) -> list[MessageResponse]:
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     messages = _get_store().get_messages(session_id)
-    return [
-        MessageResponse(
-            message_id=m.message_id,
-            role=m.role,
-            content=m.content,
-            tool_name=m.tool_name,
-            tool_call_id=m.tool_call_id,
-            created_at=m.created_at,
+    results = []
+    for m in messages:
+        tool_args = None
+        if m.role == "tool_call":
+            try:
+                tool_args = json.loads(m.content)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        results.append(
+            MessageResponse(
+                message_id=m.message_id,
+                role=m.role,
+                content=m.content,
+                tool_name=m.tool_name,
+                tool_call_id=m.tool_call_id,
+                tool_args=tool_args,
+                created_at=m.created_at,
+            )
         )
-        for m in messages
-    ]
+    return results
 
 
 @router.get("/{session_id}/tool-results", response_model=list[ToolResultResponse])

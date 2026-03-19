@@ -54,7 +54,9 @@ async def chat(body: ChatRequest) -> EventSourceResponse:
     stored_messages = store.get_messages(body.session_id)
     lc_messages = []
     for m in stored_messages:
-        if m.role == "user":
+        if m.role == "tool_call":
+            continue
+        elif m.role == "user":
             lc_messages.append(HumanMessage(content=m.content))
         elif m.role == "assistant":
             lc_messages.append(AIMessage(content=m.content))
@@ -80,6 +82,16 @@ async def chat(body: ChatRequest) -> EventSourceResponse:
                         if isinstance(msg, AIMessage):
                             if msg.tool_calls:
                                 for tc in msg.tool_calls:
+                                    store.store_message(
+                                        ChatMessage(
+                                            session_id=body.session_id,
+                                            message_id=str(uuid.uuid4()),
+                                            role="tool_call",
+                                            content=json.dumps(tc["args"]),
+                                            tool_name=tc["name"],
+                                            tool_call_id=tc["id"],
+                                        )
+                                    )
                                     yield {
                                         "event": "tool_call",
                                         "data": json.dumps(

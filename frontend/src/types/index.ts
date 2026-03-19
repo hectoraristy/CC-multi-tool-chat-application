@@ -7,10 +7,11 @@ export interface Session {
 
 export interface ChatMessage {
   message_id: string;
-  role: "user" | "assistant" | "tool";
+  role: "user" | "assistant" | "tool" | "tool_call";
   content: string;
   tool_name?: string;
   tool_call_id?: string;
+  tool_args?: Record<string, unknown>;
   created_at: string;
 }
 
