@@ -1,0 +1,76 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
+import { createSession, listSessions, updateSession } from "@/services/api";
+import type { Session } from "@/types";
+
+export function useSessions() {
+  const queryClient = useQueryClient();
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  const {
+    data: sessions = [],
+    isLoading: loading,
+  } = useQuery<Session[]>({
+    queryKey: ["sessions"],
+    queryFn: listSessions,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (title?: string) => createSession(title),
+    onSuccess: (newSession) => {
+      queryClient.setQueryData<Session[]>(["sessions"], (old = []) => [
+        newSession,
+        ...old,
+      ]);
+      setActiveSessionId(newSession.session_id);
+    },
+  });
+
+  const create = useCallback(
+    async (title?: string) => {
+      return createMutation.mutateAsync(title);
+    },
+    [createMutation]
+  );
+
+  const updateTitleMutation = useMutation({
+    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
+      updateSession(sessionId, title),
+    onMutate: async ({ sessionId, title }) => {
+      await queryClient.cancelQueries({ queryKey: ["sessions"] });
+      const previous = queryClient.getQueryData<Session[]>(["sessions"]);
+      queryClient.setQueryData<Session[]>(["sessions"], (old = []) =>
+        old.map((s) => (s.session_id === sessionId ? { ...s, title } : s))
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["sessions"], context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+
+  const updateTitle = useCallback(
+    async (sessionId: string, title: string) => {
+      return updateTitleMutation.mutateAsync({ sessionId, title });
+    },
+    [updateTitleMutation]
+  );
+
+  const selectSession = useCallback((id: string) => {
+    setActiveSessionId(id);
+  }, []);
+
+  return {
+    sessions,
+    activeSessionId,
+    loading,
+    create,
+    selectSession,
+    updateTitle,
+  };
+}
