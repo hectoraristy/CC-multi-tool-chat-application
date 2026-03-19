@@ -1,0 +1,43 @@
+services:
+  multi-tool-chat-database:
+    image: amazon/dynamodb-local:latest
+    user: root
+    ports:
+      - "8000:8000"
+    volumes:
+      - multi-tool-chat-database-data:/home/dynamodblocal/data
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
+
+  multi-tool-chat-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - DYNAMODB_ENDPOINT_URL=http://multi-tool-chat-database:8000
+      - FRONTEND_URL=http://localhost:5173
+    volumes:
+      - ./backend/src:/app/src
+    command: ["uvicorn", "api.main:app", "--reload", "--host", "0.0.0.0", "--port", "8080"]
+
+  multi-tool-chat-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_TARGET=http://multi-tool-chat-api:8080
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+    depends_on:
+      - multi-tool-chat-api
+
+volumes:
+  multi-tool-chat-database-data:
