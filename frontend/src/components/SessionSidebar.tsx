@@ -1,10 +1,21 @@
 import React, { useEffect, useRef, useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { Session } from "@/types";
-import { Pencil, Plus } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 
 interface Props {
   sessions: Session[];
@@ -12,6 +23,7 @@ interface Props {
   onSelect: (id: string) => void;
   onCreate: () => void;
   onUpdateTitle: (sessionId: string, title: string) => void;
+  onDelete: (sessionId: string) => void;
   loading: boolean;
 }
 
@@ -21,6 +33,7 @@ export function SessionSidebar({
   onSelect,
   onCreate,
   onUpdateTitle,
+  onDelete,
   loading,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -83,23 +96,56 @@ export function SessionSidebar({
                   className="h-9 text-sm"
                 />
               ) : (
-                <Button
+                <div
                   key={s.session_id}
-                  variant={s.session_id === activeSessionId ? "secondary" : "ghost"}
-                  onClick={() => onSelect(s.session_id)}
-                  onDoubleClick={() => startEditing(s)}
-                  className="w-full justify-start text-sm group"
-                  size="default"
+                  className="relative flex items-center group"
                 >
-                  <span className="truncate flex-1 text-left">{s.title}</span>
-                  <Pencil
-                    className="size-3 shrink-0 opacity-0 group-hover:opacity-70 transition-opacity"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startEditing(s);
-                    }}
-                  />
-                </Button>
+                  <Button
+                    variant={s.session_id === activeSessionId ? "secondary" : "ghost"}
+                    onClick={() => onSelect(s.session_id)}
+                    onDoubleClick={() => startEditing(s)}
+                    className="w-full justify-start text-sm pr-14"
+                    size="default"
+                  >
+                    <span className="truncate flex-1 text-left">{s.title}</span>
+                  </Button>
+                  <div className="absolute right-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      className="p-1 rounded hover:bg-accent"
+                      onClick={() => startEditing(s)}
+                    >
+                      <Pencil className="size-4 text-muted-foreground" />
+                    </button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <button
+                          type="button"
+                          className="p-1 rounded hover:bg-destructive/20"
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete chat?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently delete this chat and all its messages.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => onDelete(s.session_id)}
+                            className="bg-destructive text-white hover:bg-destructive/90"
+                          >
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
               )
             )
           )}

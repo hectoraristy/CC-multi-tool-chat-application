@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
-import { createSession, listSessions, updateSession } from "@/services/api";
+import {
+  createSession,
+  deleteSession as deleteSessionApi,
+  listSessions,
+  updateSession,
+} from "@/services/api";
 import type { Session } from "@/types";
 
 export function useSessions() {
@@ -61,6 +66,36 @@ export function useSessions() {
     [updateTitleMutation]
   );
 
+  const deleteMutation = useMutation({
+    mutationFn: (sessionId: string) => deleteSessionApi(sessionId),
+    onMutate: async (sessionId) => {
+      await queryClient.cancelQueries({ queryKey: ["sessions"] });
+      const previous = queryClient.getQueryData<Session[]>(["sessions"]);
+      queryClient.setQueryData<Session[]>(["sessions"], (old = []) =>
+        old.filter((s) => s.session_id !== sessionId)
+      );
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+      return { previous };
+    },
+    onError: (_err, _sessionId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["sessions"], context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      return deleteMutation.mutateAsync(sessionId);
+    },
+    [deleteMutation]
+  );
+
   const selectSession = useCallback((id: string) => {
     setActiveSessionId(id);
   }, []);
@@ -72,5 +107,6 @@ export function useSessions() {
     create,
     selectSession,
     updateTitle,
+    deleteSession,
   };
 }

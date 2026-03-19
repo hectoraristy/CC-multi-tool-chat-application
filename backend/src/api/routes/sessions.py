@@ -64,6 +64,13 @@ def update_session(session_id: str, body: SessionUpdate) -> SessionResponse:
     )
 
 
+@router.delete("/{session_id}", status_code=204)
+def delete_session(session_id: str) -> None:
+    deleted = _get_store().delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
 @router.get("/{session_id}/messages", response_model=list[MessageResponse])
 def get_messages(session_id: str) -> list[MessageResponse]:
     session = _get_store().get_session(session_id)

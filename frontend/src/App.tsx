@@ -3,7 +3,7 @@ import { SessionSidebar } from "@/components/SessionSidebar";
 import { useSessions } from "@/hooks/useSessions";
 
 export default function App() {
-  const { sessions, activeSessionId, loading, create, selectSession, updateTitle } =
+  const { sessions, activeSessionId, loading, create, selectSession, updateTitle, deleteSession } =
     useSessions();
 
   return (
@@ -14,6 +14,7 @@ export default function App() {
         onSelect={selectSession}
         onCreate={() => create()}
         onUpdateTitle={updateTitle}
+        onDelete={deleteSession}
         loading={loading}
       />
       <ChatWindow sessionId={activeSessionId} />

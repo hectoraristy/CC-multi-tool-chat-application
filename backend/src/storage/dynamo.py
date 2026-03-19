@@ -137,6 +137,21 @@ class DynamoDBStore:
             updated_at=datetime.fromisoformat(item["updated_at"]),
         )
 
+    def delete_session(self, session_id: str) -> bool:
+        pk = f"SESSION#{session_id}"
+        resp = self._table.query(
+            KeyConditionExpression="PK = :pk",
+            ExpressionAttributeValues={":pk": pk},
+            ProjectionExpression="PK, SK",
+        )
+        items = resp.get("Items", [])
+        if not items:
+            return False
+        with self._table.batch_writer() as batch:
+            for item in items:
+                batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+        return True
+
     # ── Messages ───────────────────────────────────────────────────────
 
     def store_message(self, message: ChatMessage) -> None:
