@@ -3,18 +3,10 @@ import { useCallback, useRef, useState } from "react";
 import { getMessages, streamChatSSE } from "@/services/api";
 import type { ChatMessage, ToolCall } from "@/types";
 
-interface PendingTool {
-  tool: string;
-  args?: Record<string, unknown>;
-  status: "calling" | "done";
-  preview?: string;
-}
-
 export function useChat(sessionId: string | null) {
   const queryClient = useQueryClient();
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
-  const [pendingTools, setPendingTools] = useState<PendingTool[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   const { data: messages = [] } = useQuery<ChatMessage[]>({
@@ -41,7 +33,6 @@ export function useChat(sessionId: string | null) {
 
       setStreaming(true);
       setStreamingContent("");
-      setPendingTools([]);
 
       let accumulated = "";
 
@@ -55,22 +46,18 @@ export function useChat(sessionId: string | null) {
           } else if (eventType === "tool_call") {
             try {
               const tc: ToolCall = JSON.parse(data);
-              setPendingTools((prev) => [
-                ...prev,
-                { tool: tc.tool, args: tc.args, status: "calling" },
-              ]);
-            } catch {
-              /* ignore parse errors */
-            }
-          } else if (eventType === "tool_result") {
-            try {
-              const tr = JSON.parse(data);
-              setPendingTools((prev) =>
-                prev.map((pt) =>
-                  pt.tool === tr.tool && pt.status === "calling"
-                    ? { ...pt, status: "done", preview: tr.result_preview }
-                    : pt
-                )
+              const toolCallMsg: ChatMessage = {
+                message_id: crypto.randomUUID(),
+                role: "tool_call",
+                content: JSON.stringify(tc.args),
+                tool_name: tc.tool,
+                tool_call_id: tc.id,
+                tool_args: tc.args,
+                created_at: new Date().toISOString(),
+              };
+              queryClient.setQueryData<ChatMessage[]>(
+                ["messages", sessionId],
+                (old = []) => [...old, toolCallMsg]
               );
             } catch {
               /* ignore parse errors */
@@ -80,7 +67,6 @@ export function useChat(sessionId: string | null) {
         () => {
           setStreamingContent("");
           setStreaming(false);
-          setPendingTools([]);
           queryClient.invalidateQueries({
             queryKey: ["messages", sessionId],
           });
@@ -104,7 +90,6 @@ export function useChat(sessionId: string | null) {
     messages,
     streaming,
     streamingContent,
-    pendingTools,
     sendMessage,
     stopStreaming,
   };

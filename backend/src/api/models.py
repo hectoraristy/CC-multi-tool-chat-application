@@ -41,6 +41,7 @@ class MessageResponse(BaseModel):
     content: str
     tool_name: str | None = None
     tool_call_id: str | None = None
+    tool_args: dict[str, Any] | None = None
     created_at: datetime
 
 

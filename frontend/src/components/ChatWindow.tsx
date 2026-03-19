@@ -11,7 +11,6 @@ export function ChatWindow({ sessionId }: Props) {
     messages,
     streaming,
     streamingContent,
-    pendingTools,
     sendMessage,
     stopStreaming,
   } = useChat(sessionId);
@@ -34,7 +33,6 @@ export function ChatWindow({ sessionId }: Props) {
       <MessageList
         messages={messages}
         streamingContent={streamingContent}
-        pendingTools={pendingTools}
       />
 
       <MessageInput
