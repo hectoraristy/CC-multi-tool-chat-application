@@ -54,6 +54,7 @@ jobs:
           context: backend/
           platforms: linux/arm64
           push: true
+          provenance: false
           tags: |
             ${{ secrets.ECR_REPOSITORY_URL }}:${{ github.sha }}
             ${{ secrets.ECR_REPOSITORY_URL }}:latest
