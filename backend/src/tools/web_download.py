@@ -9,6 +9,11 @@ from langchain_core.tools import tool
 
 @tool
 def web_download(url: str) -> str:
+    """Download a web page and return its text content.
+
+    Fetches the URL, strips HTML tags, and returns clean text
+    (truncated to ~50 000 characters).
+    """
     try:
         with httpx.Client(timeout=30, follow_redirects=True) as client:
             resp = client.get(url, headers={"User-Agent": "MultiToolChatBot/1.0"})
