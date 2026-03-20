@@ -8,7 +8,6 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
-
 from config import get_settings
 from storage.models import ChatMessage, Session, ToolResult, ToolResultMetadata
 
@@ -76,9 +75,7 @@ class DynamoDBStore:
         return session
 
     def get_session(self, session_id: str) -> Session | None:
-        resp = self._table.get_item(
-            Key={"PK": f"SESSION#{session_id}", "SK": "META"}
-        )
+        resp = self._table.get_item(Key={"PK": f"SESSION#{session_id}", "SK": "META"})
         item = resp.get("Item")
         if not item:
             return None

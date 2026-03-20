@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
-
 from agent.state import AgentState
 from config import get_settings
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 logger = logging.getLogger(__name__)
 

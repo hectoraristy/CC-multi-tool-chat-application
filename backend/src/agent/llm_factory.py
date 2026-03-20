@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from langchain_core.language_models.chat_models import BaseChatModel
-
 from config import get_settings
+from langchain_core.language_models.chat_models import BaseChatModel
 
 
 def create_llm() -> BaseChatModel:
@@ -12,6 +11,7 @@ def create_llm() -> BaseChatModel:
     match provider:
         case "openai":
             from langchain_openai import ChatOpenAI
+
             return ChatOpenAI(
                 model=settings.openai_model,
                 api_key=settings.openai_api_key,
@@ -19,6 +19,7 @@ def create_llm() -> BaseChatModel:
             )
         case "anthropic":
             from langchain_anthropic import ChatAnthropic
+
             return ChatAnthropic(
                 model=settings.anthropic_model,
                 api_key=settings.anthropic_api_key,
@@ -26,6 +27,7 @@ def create_llm() -> BaseChatModel:
             )
         case "bedrock":
             from langchain_aws import ChatBedrock
+
             return ChatBedrock(
                 model_id=settings.openai_model,
                 region_name=settings.aws_region,
