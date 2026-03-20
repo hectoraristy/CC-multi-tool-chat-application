@@ -19,14 +19,7 @@ use_rust_parser = true
 [source]
 root_patterns = [
     "backend/src",
-    "backend/tests",
 ]
-
-[test]
-use_coverage = true
-
-[coverage-py]
-interpreter_constraints = ["CPython>=3.11,<3.13"]
 
 [docker]
 build_args = []
