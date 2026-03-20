@@ -4,12 +4,11 @@ import json
 import logging
 import uuid
 
+from agent.graph import build_graph
+from api.models import ChatRequest
 from fastapi import APIRouter, HTTPException
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from sse_starlette.sse import EventSourceResponse
-
-from agent.graph import build_graph
-from api.models import ChatRequest
 from storage.dynamo import DynamoDBStore
 from storage.models import ChatMessage
 

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException
-
 from api.models import (
     MessageResponse,
     SessionCreate,
@@ -11,6 +9,7 @@ from api.models import (
     SessionUpdate,
     ToolResultResponse,
 )
+from fastapi import APIRouter, HTTPException
 from storage.dynamo import DynamoDBStore
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])

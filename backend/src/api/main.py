@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import logging
 
-from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
 from api.routes.chat import router as chat_router
 from api.routes.sessions import router as sessions_router
 from config import get_settings
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
