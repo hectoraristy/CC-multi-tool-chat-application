@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: ["**"]
   pull_request:
+    branches: ["**"]
+  push:
     branches: ["**"]
 
 concurrency:
@@ -27,7 +27,7 @@ jobs:
           named-caches-hash: ${{ hashFiles('pants.toml') }}
 
       - name: Lint backend
-        run: pants lint backend::
+        run: pants lint "backend::"
 
   frontend-lint:
     name: Frontend Lint
