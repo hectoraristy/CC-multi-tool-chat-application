@@ -1,0 +1,9 @@
+project_name          = "multi-tool-chat"
+aws_region            = "us-east-2"
+environment           = "dev"
+backend_image_tag     = "latest"
+backend_cpu           = 512
+backend_memory        = 1024
+backend_desired_count = 1
+llm_provider          = "openai"
+secrets_manager_secret_arn = "arn:aws:secretsmanager:us-east-2:ACCOUNT_ID:secret:multi-chat-creds-XXXXXX"
