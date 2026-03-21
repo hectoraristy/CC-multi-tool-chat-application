@@ -6,6 +6,7 @@ import {
   listSessions,
   updateSession,
 } from "@/services/api";
+import { queryKeys } from "@/lib/queryKeys";
 import type { Session } from "@/types";
 
 export function useSessions() {
@@ -16,14 +17,14 @@ export function useSessions() {
     data: sessions = [],
     isLoading: loading,
   } = useQuery<Session[]>({
-    queryKey: ["sessions"],
+    queryKey: queryKeys.sessions,
     queryFn: listSessions,
   });
 
   const createMutation = useMutation({
     mutationFn: (title?: string) => createSession(title),
     onSuccess: (newSession) => {
-      queryClient.setQueryData<Session[]>(["sessions"], (old = []) => [
+      queryClient.setQueryData<Session[]>(queryKeys.sessions, (old = []) => [
         newSession,
         ...old,
       ]);
@@ -42,20 +43,20 @@ export function useSessions() {
     mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
       updateSession(sessionId, title),
     onMutate: async ({ sessionId, title }) => {
-      await queryClient.cancelQueries({ queryKey: ["sessions"] });
-      const previous = queryClient.getQueryData<Session[]>(["sessions"]);
-      queryClient.setQueryData<Session[]>(["sessions"], (old = []) =>
+      await queryClient.cancelQueries({ queryKey: queryKeys.sessions });
+      const previous = queryClient.getQueryData<Session[]>(queryKeys.sessions);
+      queryClient.setQueryData<Session[]>(queryKeys.sessions, (old = []) =>
         old.map((s) => (s.session_id === sessionId ? { ...s, title } : s))
       );
       return { previous };
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(["sessions"], context.previous);
+        queryClient.setQueryData(queryKeys.sessions, context.previous);
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
     },
   });
 
@@ -69,9 +70,9 @@ export function useSessions() {
   const deleteMutation = useMutation({
     mutationFn: (sessionId: string) => deleteSessionApi(sessionId),
     onMutate: async (sessionId) => {
-      await queryClient.cancelQueries({ queryKey: ["sessions"] });
-      const previous = queryClient.getQueryData<Session[]>(["sessions"]);
-      queryClient.setQueryData<Session[]>(["sessions"], (old = []) =>
+      await queryClient.cancelQueries({ queryKey: queryKeys.sessions });
+      const previous = queryClient.getQueryData<Session[]>(queryKeys.sessions);
+      queryClient.setQueryData<Session[]>(queryKeys.sessions, (old = []) =>
         old.filter((s) => s.session_id !== sessionId)
       );
       if (activeSessionId === sessionId) {
@@ -81,11 +82,11 @@ export function useSessions() {
     },
     onError: (_err, _sessionId, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(["sessions"], context.previous);
+        queryClient.setQueryData(queryKeys.sessions, context.previous);
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
     },
   });
 

@@ -1,16 +1,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useRef, useState } from "react";
-import { getMessages, streamChatSSE } from "@/services/api";
+import { useCallback } from "react";
+import { getMessages } from "@/services/api";
+import { useStreamChat } from "@/hooks/useStreamChat";
+import { queryKeys } from "@/lib/queryKeys";
 import type { ChatMessage, ToolCall } from "@/types";
 
 export function useChat(sessionId: string | null) {
   const queryClient = useQueryClient();
-  const [streaming, setStreaming] = useState(false);
-  const [streamingContent, setStreamingContent] = useState("");
-  const abortRef = useRef<AbortController | null>(null);
+  const { streaming, streamingContent, startStream, stopStream } = useStreamChat();
 
   const { data: messages = [] } = useQuery<ChatMessage[]>({
-    queryKey: ["messages", sessionId],
+    queryKey: queryKeys.messages(sessionId!),
     queryFn: () => getMessages(sessionId!),
     enabled: !!sessionId,
   });
@@ -26,24 +26,16 @@ export function useChat(sessionId: string | null) {
         created_at: new Date().toISOString(),
       };
 
+      const msgKey = queryKeys.messages(sessionId);
+
       queryClient.setQueryData<ChatMessage[]>(
-        ["messages", sessionId],
+        msgKey,
         (old = []) => [...old, userMsg]
       );
 
-      setStreaming(true);
-      setStreamingContent("");
-
-      let accumulated = "";
-
-      abortRef.current = streamChatSSE(
-        sessionId,
-        content,
-        (eventType, data) => {
-          if (eventType === "token") {
-            accumulated += data;
-            setStreamingContent(accumulated);
-          } else if (eventType === "tool_call") {
+      startStream(sessionId, content, {
+        onEvent: (eventType, data) => {
+          if (eventType === "tool_call") {
             try {
               const tc: ToolCall = JSON.parse(data);
               const toolCallMsg: ChatMessage = {
@@ -56,7 +48,7 @@ export function useChat(sessionId: string | null) {
                 created_at: new Date().toISOString(),
               };
               queryClient.setQueryData<ChatMessage[]>(
-                ["messages", sessionId],
+                msgKey,
                 (old = []) => [...old, toolCallMsg]
               );
             } catch {
@@ -64,33 +56,22 @@ export function useChat(sessionId: string | null) {
             }
           }
         },
-        () => {
-          setStreamingContent("");
-          setStreaming(false);
-          queryClient.invalidateQueries({
-            queryKey: ["messages", sessionId],
-          });
+        onDone: () => {
+          queryClient.invalidateQueries({ queryKey: msgKey });
         },
-        (err) => {
+        onError: (err) => {
           console.error("Stream error:", err);
-          setStreaming(false);
-          setStreamingContent("");
-        }
-      );
+        },
+      });
     },
-    [sessionId, streaming, queryClient]
+    [sessionId, streaming, queryClient, startStream]
   );
-
-  const stopStreaming = useCallback(() => {
-    abortRef.current?.abort();
-    setStreaming(false);
-  }, []);
 
   return {
     messages,
     streaming,
     streamingContent,
     sendMessage,
-    stopStreaming,
+    stopStreaming: stopStream,
   };
 }

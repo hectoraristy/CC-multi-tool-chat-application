@@ -1,4 +1,5 @@
 import { ChatWindow } from "@/components/ChatWindow";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { useSessions } from "@/hooks/useSessions";
 
@@ -17,7 +18,9 @@ export default function App() {
         onDelete={deleteSession}
         loading={loading}
       />
-      <ChatWindow sessionId={activeSessionId} />
+      <ErrorBoundary>
+        <ChatWindow sessionId={activeSessionId} />
+      </ErrorBoundary>
     </div>
   );
 }
