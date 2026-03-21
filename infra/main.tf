@@ -31,22 +31,103 @@ module "dynamodb" {
   project_name = var.project_name
 }
 
-module "ecs" {
-  source = "./modules/ecs"
+# --- IAM: Backend instance role (DynamoDB + Secrets Manager) ---
 
-  project_name          = var.project_name
-  aws_region            = var.aws_region
-  backend_image         = "${module.ecr.repository_url}:${var.backend_image_tag}"
-  backend_cpu           = var.backend_cpu
-  backend_memory        = var.backend_memory
-  backend_desired_count = var.backend_desired_count
-  dynamodb_table_name   = module.dynamodb.table_name
-  dynamodb_table_arn    = module.dynamodb.table_arn
-  secrets_manager_secret_arn = var.secrets_manager_secret_arn
-  llm_provider          = var.llm_provider
+resource "aws_iam_role" "backend_instance" {
+  name = "${var.project_name}-apprunner-instance-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "tasks.apprunner.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
 }
 
-module "frontend_hosting" {
-  source       = "./modules/frontend_hosting"
-  project_name = var.project_name
+resource "aws_iam_role_policy" "dynamodb_access" {
+  name = "${var.project_name}-dynamodb-access"
+  role = aws_iam_role.backend_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:DescribeTable",
+        ]
+        Resource = [
+          module.dynamodb.table_arn,
+          "${module.dynamodb.table_arn}/index/*",
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "secrets_access" {
+  name = "${var.project_name}-secrets-access"
+  role = aws_iam_role.backend_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [var.secrets_manager_secret_arn]
+      }
+    ]
+  })
+}
+
+# --- App Runner Services ---
+
+module "backend" {
+  source             = "./modules/apprunner"
+  project_name       = var.project_name
+  service_name       = "backend"
+  ecr_repository_url = module.ecr.backend_repository_url
+  image_tag          = var.backend_image_tag
+  port               = "8080"
+  cpu                = var.backend_cpu
+  memory             = var.backend_memory
+  instance_role_arn  = aws_iam_role.backend_instance.arn
+  health_check_path  = "/health"
+  health_check_protocol = "HTTP"
+  environment_variables = {
+    DYNAMODB_TABLE_NAME = module.dynamodb.table_name
+    AWS_REGION          = var.aws_region
+    LLM_PROVIDER        = var.llm_provider
+    LOG_LEVEL           = "INFO"
+    FRONTEND_URL        = "https://${module.frontend.service_url}"
+    DYNAMODB_ENDPOINT_URL = module.dynamodb.table_endpoint_url
+
+  }
+  environment_secrets = {
+    OPENAI_API_KEY = "${var.secrets_manager_secret_arn}:OPENAI_API_KEY::"
+  }
+}
+
+module "frontend" {
+  source             = "./modules/apprunner"
+  project_name       = var.project_name
+  service_name       = "frontend"
+  ecr_repository_url = module.ecr.frontend_repository_url
+  image_tag          = var.frontend_image_tag
+  port               = "80"
+  cpu                = "256"
+  memory             = "512"
 }

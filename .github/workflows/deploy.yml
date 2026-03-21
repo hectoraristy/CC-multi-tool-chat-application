@@ -42,66 +42,22 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - uses: aws-actions/amazon-ecr-login@v2
-        id: ecr-login
-
-      - uses: docker/setup-qemu-action@v3
-
-      - uses: docker/setup-buildx-action@v3
 
       - name: Build, tag, and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: backend/
-          platforms: linux/arm64
-          push: true
-          provenance: false
-          tags: |
-            ${{ secrets.ECR_REPOSITORY_URL }}:${{ github.sha }}
-            ${{ secrets.ECR_REPOSITORY_URL }}:latest
-
-      - name: Deploy to ECS
-        env:
-          ECS_CLUSTER: ${{ secrets.ECS_CLUSTER_NAME }}
-          ECS_SERVICE: ${{ secrets.ECS_SERVICE_NAME }}
         run: |
-          aws ecs update-service \
-            --cluster $ECS_CLUSTER \
-            --service $ECS_SERVICE \
-            --force-new-deployment \
-            --no-cli-pager
-
-      - name: Wait for deployment to stabilize
-        env:
-          ECS_CLUSTER: ${{ secrets.ECS_CLUSTER_NAME }}
-          ECS_SERVICE: ${{ secrets.ECS_SERVICE_NAME }}
-        run: |
-          aws ecs wait services-stable \
-            --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE \
-            --no-cli-pager
+          docker build -t ${{ secrets.ECR_BACKEND_REPOSITORY_URL }}:${{ github.sha }} \
+                        -t ${{ secrets.ECR_BACKEND_REPOSITORY_URL }}:latest \
+                        backend/
+          docker push ${{ secrets.ECR_BACKEND_REPOSITORY_URL }}:${{ github.sha }}
+          docker push ${{ secrets.ECR_BACKEND_REPOSITORY_URL }}:latest
 
   deploy-frontend:
     name: Deploy Frontend
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -109,13 +65,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Sync to S3
-        run: |
-          aws s3 sync dist/ s3://${{ secrets.FRONTEND_BUCKET_NAME }} --delete
+      - uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Invalidate CloudFront cache
+      - name: Build, tag, and push Docker image
         run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/*" \
-            --no-cli-pager
+          docker build \
+            --build-arg VITE_API_URL=${{ secrets.BACKEND_API_URL }} \
+            -t ${{ secrets.ECR_FRONTEND_REPOSITORY_URL }}:${{ github.sha }} \
+            -t ${{ secrets.ECR_FRONTEND_REPOSITORY_URL }}:latest \
+            frontend/
+          docker push ${{ secrets.ECR_FRONTEND_REPOSITORY_URL }}:${{ github.sha }}
+          docker push ${{ secrets.ECR_FRONTEND_REPOSITORY_URL }}:latest
