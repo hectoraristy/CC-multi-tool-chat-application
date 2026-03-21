@@ -11,9 +11,10 @@ interface Props {
   messages: ChatMessage[];
   streamingContent: string;
   streaming: boolean;
+  sessionId: string;
 }
 
-export function MessageList({ messages, streamingContent, streaming }: Props) {
+export function MessageList({ messages, streamingContent, streaming, sessionId }: Props) {
   const endRef = useAutoScroll([messages, streamingContent, streaming]);
   const isEmpty = messages.length === 0 && !streamingContent && !streaming;
 
@@ -28,6 +29,8 @@ export function MessageList({ messages, streamingContent, streaming }: Props) {
               <ToolCallInlineMessage
                 tool={msg.tool_name || "unknown"}
                 args={msg.tool_args}
+                sessionId={sessionId}
+                resultId={msg.result_id}
               />
             </div>
           ) : (

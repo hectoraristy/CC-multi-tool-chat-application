@@ -31,6 +31,12 @@ module "dynamodb" {
   project_name = var.project_name
 }
 
+module "s3" {
+  source          = "./modules/s3"
+  project_name    = var.project_name
+  expiration_days = var.s3_results_expiration_days
+}
+
 # --- IAM: Backend instance role (DynamoDB + Secrets Manager) ---
 
 resource "aws_iam_role" "backend_instance" {
@@ -77,6 +83,25 @@ resource "aws_iam_role_policy" "dynamodb_access" {
   })
 }
 
+resource "aws_iam_role_policy" "s3_results_access" {
+  name = "${var.project_name}-s3-results-access"
+  role = aws_iam_role.backend_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+        ]
+        Resource = "${module.s3.bucket_arn}/results/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "secrets_access" {
   name = "${var.project_name}-secrets-access"
   role = aws_iam_role.backend_instance.id
@@ -108,13 +133,12 @@ module "backend" {
   health_check_path  = "/health"
   health_check_protocol = "HTTP"
   environment_variables = {
-    DYNAMODB_TABLE_NAME = module.dynamodb.table_name
-    AWS_REGION          = var.aws_region
-    LLM_PROVIDER        = var.llm_provider
-    LOG_LEVEL           = "INFO"
-    FRONTEND_URL        = "https://${module.frontend.service_url}"
-    DYNAMODB_ENDPOINT_URL = module.dynamodb.table_endpoint_url
-
+    DYNAMODB_TABLE_NAME   = module.dynamodb.table_name
+    AWS_REGION            = var.aws_region
+    LLM_PROVIDER          = var.llm_provider
+    LOG_LEVEL             = "INFO"
+    FRONTEND_URL          = "https://${module.frontend.service_url}"
+    S3_RESULTS_BUCKET     = module.s3.bucket_name
   }
   environment_secrets = {
     OPENAI_API_KEY = "${var.secrets_manager_secret_arn}:OPENAI_API_KEY::"

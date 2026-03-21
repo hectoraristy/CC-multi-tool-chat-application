@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import uuid
@@ -9,7 +10,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 from config import get_settings
-from storage.models import ChatMessage, Session, ToolResult, ToolResultMetadata
+from storage.models import ChatMessage, PaginatedResult, Session, ToolResult, ToolResultMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -86,23 +87,37 @@ class DynamoDBStore:
             updated_at=datetime.fromisoformat(item["updated_at"]),
         )
 
-    def list_sessions(self) -> list[Session]:
-        resp = self._table.scan(
-            FilterExpression="SK = :sk",
-            ExpressionAttributeValues={":sk": "META"},
-        )
-        sessions = []
-        for item in resp.get("Items", []):
-            sessions.append(
-                Session(
-                    session_id=item["session_id"],
-                    title=item["title"],
-                    created_at=datetime.fromisoformat(item["created_at"]),
-                    updated_at=datetime.fromisoformat(item["updated_at"]),
-                )
+    def list_sessions(
+        self,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> PaginatedResult[Session]:
+        scan_kwargs: dict[str, Any] = {
+            "FilterExpression": "SK = :sk",
+            "ExpressionAttributeValues": {":sk": "META"},
+            "Limit": limit * 3,
+        }
+        if cursor:
+            scan_kwargs["ExclusiveStartKey"] = json.loads(base64.urlsafe_b64decode(cursor).decode())
+
+        resp = self._table.scan(**scan_kwargs)
+        sessions = [
+            Session(
+                session_id=item["session_id"],
+                title=item["title"],
+                created_at=datetime.fromisoformat(item["created_at"]),
+                updated_at=datetime.fromisoformat(item["updated_at"]),
             )
+            for item in resp.get("Items", [])
+        ]
         sessions.sort(key=lambda s: s.updated_at, reverse=True)
-        return sessions
+
+        next_cursor: str | None = None
+        last_key = resp.get("LastEvaluatedKey")
+        if last_key:
+            next_cursor = base64.urlsafe_b64encode(json.dumps(last_key).encode()).decode()
+
+        return PaginatedResult(items=sessions[:limit], next_cursor=next_cursor)
 
     def update_session_timestamp(self, session_id: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -195,20 +210,21 @@ class DynamoDBStore:
     # ── Tool Results ───────────────────────────────────────────────────
 
     def store_tool_result(self, result: ToolResult) -> None:
-        self._table.put_item(
-            Item={
-                "PK": f"SESSION#{result.session_id}",
-                "SK": f"RESULT#{result.result_id}",
-                "session_id": result.session_id,
-                "result_id": result.result_id,
-                "tool_name": result.tool_name,
-                "summary": result.summary,
-                "full_result": result.full_result,
-                "metadata": json.dumps(result.metadata),
-                "created_at": result.created_at.isoformat(),
-                "size_bytes": result.size_bytes,
-            }
-        )
+        item: dict[str, Any] = {
+            "PK": f"SESSION#{result.session_id}",
+            "SK": f"RESULT#{result.result_id}",
+            "session_id": result.session_id,
+            "result_id": result.result_id,
+            "tool_name": result.tool_name,
+            "summary": result.summary,
+            "full_result": result.full_result,
+            "metadata": json.dumps(result.metadata),
+            "created_at": result.created_at.isoformat(),
+            "size_bytes": result.size_bytes,
+        }
+        if result.s3_key:
+            item["s3_key"] = result.s3_key
+        self._table.put_item(Item=item)
 
     def get_tool_result(self, session_id: str, result_id: str) -> ToolResult | None:
         resp = self._table.get_item(
@@ -222,7 +238,8 @@ class DynamoDBStore:
             result_id=item["result_id"],
             tool_name=item["tool_name"],
             summary=item["summary"],
-            full_result=item["full_result"],
+            full_result=item.get("full_result", ""),
+            s3_key=item.get("s3_key"),
             metadata=json.loads(item.get("metadata", "{}")),
             created_at=datetime.fromisoformat(item["created_at"]),
             size_bytes=int(item["size_bytes"]),
@@ -236,7 +253,8 @@ class DynamoDBStore:
                 ":prefix": "RESULT#",
             },
             ProjectionExpression=(
-                "session_id, result_id, tool_name, summary, metadata, created_at, size_bytes"
+                "session_id, result_id, tool_name, summary, s3_key, metadata,"
+                " created_at, size_bytes"
             ),
         )
         results = []
@@ -247,6 +265,7 @@ class DynamoDBStore:
                     result_id=item["result_id"],
                     tool_name=item["tool_name"],
                     summary=item["summary"],
+                    s3_key=item.get("s3_key"),
                     metadata=json.loads(item.get("metadata", "{}")),
                     created_at=datetime.fromisoformat(item["created_at"]),
                     size_bytes=int(item["size_bytes"]),

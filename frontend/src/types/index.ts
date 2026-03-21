@@ -12,6 +12,7 @@ export interface ChatMessage {
   tool_name?: string;
   tool_call_id?: string;
   tool_args?: Record<string, unknown>;
+  result_id?: string;
   created_at: string;
 }
 
@@ -24,6 +25,7 @@ export interface ToolCall {
 export interface ToolResult {
   tool: string;
   result_preview: string;
+  result_id?: string;
 }
 
 export interface StreamEvent {

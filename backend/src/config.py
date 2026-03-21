@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     summarize_token_threshold: int = 4000
 
+    s3_results_bucket: str = ""
+    s3_presigned_url_expiry: int = 3600
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

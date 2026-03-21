@@ -1,31 +1,157 @@
 from __future__ import annotations
 
+import logging
 import uuid
+from collections.abc import Callable
 from typing import Literal
 
+from api.dependencies import get_s3_store, get_store
+from config import get_settings
+from constants import RESULT_ID_RE, S3_OFFLOAD_THRESHOLD
 from langchain_core.tools import tool
-from storage.dynamo import DynamoDBStore
 from storage.models import ToolResult
 from storage.protocols import Store
+from storage.s3 import S3ResultStore
 
-_store: Store | None = None
-
-
-def _get_store() -> Store:
-    global _store
-    if _store is None:
-        _store = DynamoDBStore()
-    return _store
+logger = logging.getLogger(__name__)
 
 
-def set_store(store: Store) -> None:
-    global _store
-    _store = store
+def _handle_store(
+    store: Store,
+    session_id: str,
+    result_id: str,
+    tool_name: str,
+    content: str,
+    summary: str,
+) -> str:
+    for text in (content, summary):
+        match = RESULT_ID_RE.search(text)
+        if match:
+            existing_rid = match.group(1)
+            existing = store.get_tool_result(session_id, existing_rid)
+            if existing:
+                logger.info(
+                    "Skipping duplicate store — full result already saved as %s (%d bytes)",
+                    existing_rid,
+                    existing.size_bytes,
+                )
+                return (
+                    f"[Result ID: {existing_rid}] Full result is already stored "
+                    f"({existing.size_bytes} bytes). No need to store again."
+                )
+
+    rid = result_id or str(uuid.uuid4())
+    truncated_summary = summary or content[:500]
+
+    s3_key: str | None = None
+    stored_content = content
+
+    s3 = get_s3_store()
+    if s3 is not None and len(content.encode("utf-8")) > S3_OFFLOAD_THRESHOLD:
+        s3_key = S3ResultStore.make_key(session_id, rid)
+        s3.upload_result(s3_key, content)
+        stored_content = ""
+        logger.info("Offloaded large result %s to S3 key %s", rid, s3_key)
+
+    result = ToolResult(
+        session_id=session_id,
+        result_id=rid,
+        tool_name=tool_name,
+        summary=truncated_summary,
+        full_result=stored_content,
+        s3_key=s3_key,
+        size_bytes=len(content.encode("utf-8")),
+        metadata={"source_tool": tool_name},
+    )
+    store.store_tool_result(result)
+    return (
+        f"[Result ID: {rid}] Stored from tool '{tool_name}' "
+        f"({result.size_bytes} bytes). Summary: {truncated_summary[:200]}"
+    )
+
+
+def _handle_retrieve(
+    store: Store,
+    session_id: str,
+    result_id: str,
+    **_: str,
+) -> str:
+    if not result_id:
+        return "Error: result_id is required for retrieve action."
+    result = store.get_tool_result(session_id, result_id)
+    if result is None:
+        return f"No result found with id '{result_id}' in session '{session_id}'."
+
+    if result.full_result:
+        return result.full_result
+
+    if result.s3_key:
+        s3 = get_s3_store()
+        if s3 is not None:
+            return s3.download_result(result.s3_key)
+
+    return f"No content available for result '{result_id}'."
+
+
+def _handle_list(
+    store: Store,
+    session_id: str,
+    **_: str,
+) -> str:
+    items = store.list_tool_results(session_id)
+    if not items:
+        return "No stored results in this session."
+    lines = [
+        f"- [{item.result_id}] {item.tool_name} | " f"{item.size_bytes}B | {item.summary[:120]}"
+        for item in items
+    ]
+    return "\n".join(lines)
+
+
+def _handle_download_url(
+    store: Store,
+    session_id: str,
+    result_id: str,
+    **_: str,
+) -> str:
+    if not result_id:
+        return "Error: result_id is required for get_download_url action."
+    result = store.get_tool_result(session_id, result_id)
+    if result is None:
+        return f"No result found with id '{result_id}' in session '{session_id}'."
+
+    settings = get_settings()
+    s3 = get_s3_store()
+
+    if result.s3_key and s3 is not None:
+        url = s3.generate_presigned_url(result.s3_key)
+        return f"Download URL (expires in {settings.s3_presigned_url_expiry}s): {url}"
+
+    if result.full_result and s3 is not None:
+        s3_key = S3ResultStore.make_key(session_id, result_id)
+        s3.upload_result(s3_key, result.full_result)
+        result.s3_key = s3_key
+        store.store_tool_result(result)
+        url = s3.generate_presigned_url(s3_key)
+        return f"Download URL (expires in {settings.s3_presigned_url_expiry}s): {url}"
+
+    return (
+        "Cannot generate a download URL — S3 storage is not configured. "
+        "The user can download the result using the download button in the UI."
+    )
+
+
+_ACTION_HANDLERS: dict[str, Callable[..., str]] = {
+    "store": _handle_store,
+    "retrieve": _handle_retrieve,
+    "list": _handle_list,
+    "get_download_url": _handle_download_url,
+}
 
 
 @tool
 def session_manager(
-    action: Literal["store", "retrieve", "list"],
+    action: Literal["store", "retrieve", "list", "get_download_url"],
     session_id: str,
     result_id: str = "",
     tool_name: str = "",
@@ -39,44 +165,18 @@ def session_manager(
         Returns the result_id and metadata (the full content is NOT echoed back).
       - retrieve: Fetch the full content of a previously stored result by result_id.
       - list: List metadata (id, tool_name, summary, size) of all stored results.
+      - get_download_url: Generate a temporary download URL for a stored result by result_id.
+        Returns a pre-signed URL the user can open in their browser.
     """
-    store = _get_store()
+    handler = _ACTION_HANDLERS.get(action)
+    if handler is None:
+        return f"Unknown action: {action}"
 
-    if action == "store":
-        rid = result_id or str(uuid.uuid4())
-        truncated_summary = summary or content[:500]
-        result = ToolResult(
-            session_id=session_id,
-            result_id=rid,
-            tool_name=tool_name,
-            summary=truncated_summary,
-            full_result=content,
-            metadata={"source_tool": tool_name},
-        )
-        store.store_tool_result(result)
-        return (
-            f"Stored result {rid} from tool '{tool_name}' "
-            f"({result.size_bytes} bytes). Summary: {truncated_summary[:200]}"
-        )
-
-    if action == "retrieve":
-        if not result_id:
-            return "Error: result_id is required for retrieve action."
-        result = store.get_tool_result(session_id, result_id)
-        if result is None:
-            return f"No result found with id '{result_id}' in session '{session_id}'."
-        return result.full_result
-
-    if action == "list":
-        items = store.list_tool_results(session_id)
-        if not items:
-            return "No stored results in this session."
-        lines = []
-        for item in items:
-            lines.append(
-                f"- [{item.result_id}] {item.tool_name} | "
-                f"{item.size_bytes}B | {item.summary[:120]}"
-            )
-        return "\n".join(lines)
-
-    return f"Unknown action: {action}"
+    return handler(
+        store=get_store(),
+        session_id=session_id,
+        result_id=result_id,
+        tool_name=tool_name,
+        content=content,
+        summary=summary,
+    )
