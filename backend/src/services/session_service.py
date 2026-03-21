@@ -1,9 +1,3 @@
-"""Business logic for session management.
-
-Wraps storage operations and raises domain exceptions, keeping
-route handlers free of persistence details.
-"""
-
 from __future__ import annotations
 
 import json

@@ -1,10 +1,3 @@
-"""Centralized FastAPI dependency providers.
-
-Use these with ``Depends()`` in route signatures so that shared
-resources (store, graph) are created once and can be overridden in
-tests via ``app.dependency_overrides``.
-"""
-
 from __future__ import annotations
 
 from functools import lru_cache

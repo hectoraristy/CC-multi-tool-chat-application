@@ -1,9 +1,3 @@
-"""Domain exceptions decoupled from HTTP transport.
-
-Services and repositories raise these; the FastAPI exception handlers
-in ``api.main`` translate them to proper JSON responses.
-"""
-
 from __future__ import annotations
 
 

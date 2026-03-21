@@ -1,11 +1,3 @@
-"""Abstract repository protocols for storage operations.
-
-These protocols use Python's structural typing so that any class
-implementing the required methods satisfies the protocol without
-explicit inheritance. This enables easy testing and swapping of
-storage backends.
-"""
-
 from __future__ import annotations
 
 from typing import Protocol

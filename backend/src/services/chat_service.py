@@ -1,9 +1,3 @@
-"""Business logic for the chat flow.
-
-Keeps the route handler thin by encapsulating message conversion,
-persistence, and SSE event formatting here.
-"""
-
 from __future__ import annotations
 
 import json

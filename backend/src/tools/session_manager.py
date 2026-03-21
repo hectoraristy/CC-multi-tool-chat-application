@@ -1,11 +1,3 @@
-"""Session Manager Tool — the core tool for persisting and retrieving tool results.
-
-The agent uses this to:
-  1. **store** a tool result in DynamoDB (returns metadata only, keeping context lean).
-  2. **retrieve** a previously stored result by ID (brings full content into context).
-  3. **list** metadata for all stored results in the current session.
-"""
-
 from __future__ import annotations
 
 import uuid

@@ -1,5 +1,3 @@
-"""Web Download Tool — fetch and parse web page content."""
-
 from __future__ import annotations
 
 import httpx
@@ -11,8 +9,7 @@ from langchain_core.tools import tool
 def web_download(url: str) -> str:
     """Download a web page and return its text content.
 
-    Fetches the URL, strips HTML tags, and returns clean text
-    (truncated to ~50 000 characters).
+    Fetches the URL, strips HTML tags, and returns clean text.
     """
     try:
         with httpx.Client(timeout=30, follow_redirects=True) as client:

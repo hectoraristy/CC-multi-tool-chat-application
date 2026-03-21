@@ -1,9 +1,3 @@
-"""Database Query Tool — execute read-only SQL queries.
-
-Uses SQLite locally for development.  The interface is designed so that
-a production implementation can swap in RDS/Aurora via SQLAlchemy.
-"""
-
 from __future__ import annotations
 
 import sqlite3

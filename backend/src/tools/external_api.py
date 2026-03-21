@@ -1,5 +1,3 @@
-"""External API Tool — make HTTP requests to external endpoints."""
-
 from __future__ import annotations
 
 import json
