@@ -66,6 +66,7 @@ resource "aws_iam_role_policy" "dynamodb_access" {
           "dynamodb:DeleteItem",
           "dynamodb:Query",
           "dynamodb:Scan",
+          "dynamodb:DescribeTable",
         ]
         Resource = [
           module.dynamodb.table_arn,
