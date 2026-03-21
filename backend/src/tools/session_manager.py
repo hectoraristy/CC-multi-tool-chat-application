@@ -14,18 +14,19 @@ from typing import Literal
 from langchain_core.tools import tool
 from storage.dynamo import DynamoDBStore
 from storage.models import ToolResult
+from storage.protocols import Store
 
-_store = None
+_store: Store | None = None
 
 
-def _get_store() -> DynamoDBStore:
+def _get_store() -> Store:
     global _store
     if _store is None:
         _store = DynamoDBStore()
     return _store
 
 
-def set_store(store: DynamoDBStore) -> None:
+def set_store(store: Store) -> None:
     global _store
     _store = store
 

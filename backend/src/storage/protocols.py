@@ -1,0 +1,39 @@
+"""Abstract repository protocols for storage operations.
+
+These protocols use Python's structural typing so that any class
+implementing the required methods satisfies the protocol without
+explicit inheritance. This enables easy testing and swapping of
+storage backends.
+"""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+from storage.models import ChatMessage, Session, ToolResult, ToolResultMetadata
+
+
+class SessionRepository(Protocol):
+    def create_session(self, title: str = "New Chat") -> Session: ...
+    def get_session(self, session_id: str) -> Session | None: ...
+    def list_sessions(self) -> list[Session]: ...
+    def update_session_title(self, session_id: str, title: str) -> Session | None: ...
+    def update_session_timestamp(self, session_id: str) -> None: ...
+    def delete_session(self, session_id: str) -> bool: ...
+
+
+class MessageRepository(Protocol):
+    def store_message(self, message: ChatMessage) -> None: ...
+    def get_messages(self, session_id: str) -> list[ChatMessage]: ...
+
+
+class ToolResultRepository(Protocol):
+    def store_tool_result(self, result: ToolResult) -> None: ...
+    def get_tool_result(self, session_id: str, result_id: str) -> ToolResult | None: ...
+    def list_tool_results(self, session_id: str) -> list[ToolResultMetadata]: ...
+
+
+class Store(SessionRepository, MessageRepository, ToolResultRepository, Protocol):
+    """Combined protocol for implementations that satisfy all three repositories."""
+
+    ...
