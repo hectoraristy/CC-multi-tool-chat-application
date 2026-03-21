@@ -8,17 +8,24 @@ from config import get_settings
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from storage.dynamo import DynamoDBStore
 from storage.models import ToolResult
+from storage.protocols import Store
 
 logger = logging.getLogger(__name__)
 
-_store: DynamoDBStore | None = None
+_store: Store | None = None
 
 
-def _get_store() -> DynamoDBStore:
+def _get_store() -> Store:
     global _store
     if _store is None:
         _store = DynamoDBStore()
     return _store
+
+
+def set_store(store: Store) -> None:
+    global _store
+    _store = store
+
 
 SUMMARIZE_SYSTEM_PROMPT = (
     "You are a summarization assistant. Condense the following tool output "
@@ -83,10 +90,7 @@ def summarize_node(state: AgentState) -> dict[str, list[BaseMessage]]:
     )
 
     summarized = ToolMessage(
-        content=(
-            f"[Summarized — full result stored as {result_id}] "
-            f"{summary_resp.content}"
-        ),
+        content=(f"[Summarized — full result stored as {result_id}] " f"{summary_resp.content}"),
         tool_call_id=last_tool_msg.tool_call_id,
         name=last_tool_msg.name,
     )

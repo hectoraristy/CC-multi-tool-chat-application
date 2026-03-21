@@ -1,13 +1,9 @@
 import { Badge } from "@/components/ui/badge";
+import { formatArgValue } from "@/lib/utils";
 
 interface Props {
   tool: string;
   args?: Record<string, unknown>;
-}
-
-function formatArgValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  return JSON.stringify(value, null, 2);
 }
 
 export function ToolCallInlineMessage({ tool, args }: Props) {

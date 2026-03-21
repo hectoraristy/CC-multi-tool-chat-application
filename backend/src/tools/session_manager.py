@@ -1,11 +1,3 @@
-"""Session Manager Tool — the core tool for persisting and retrieving tool results.
-
-The agent uses this to:
-  1. **store** a tool result in DynamoDB (returns metadata only, keeping context lean).
-  2. **retrieve** a previously stored result by ID (brings full content into context).
-  3. **list** metadata for all stored results in the current session.
-"""
-
 from __future__ import annotations
 
 import uuid
@@ -14,18 +6,19 @@ from typing import Literal
 from langchain_core.tools import tool
 from storage.dynamo import DynamoDBStore
 from storage.models import ToolResult
+from storage.protocols import Store
 
-_store = None
+_store: Store | None = None
 
 
-def _get_store() -> DynamoDBStore:
+def _get_store() -> Store:
     global _store
     if _store is None:
         _store = DynamoDBStore()
     return _store
 
 
-def set_store(store: DynamoDBStore) -> None:
+def set_store(store: Store) -> None:
     global _store
     _store = store
 

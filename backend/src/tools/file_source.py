@@ -1,5 +1,3 @@
-"""File Source Tool — read CSV/JSON files from local filesystem or S3."""
-
 from __future__ import annotations
 
 import csv

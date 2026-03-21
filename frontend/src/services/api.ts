@@ -1,3 +1,4 @@
+import { readSSEStream } from "@/lib/sse";
 import type { ChatMessage, Session } from "@/types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "/api";
@@ -68,49 +69,25 @@ export function streamChatSSE(
       });
 
       if (!res.ok) throw new Error(`Chat failed: ${res.statusText}`);
+      if (!res.body) throw new Error("No response body");
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
+      let terminated = false;
 
-      const decoder = new TextDecoder();
-      let buffer = "";
+      await readSSEStream(res.body, ({ event, data }) => {
+        if (terminated) return;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        buffer = buffer.replace(/\r\n/g, "\n");
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() || "";
-
-        for (const part of parts) {
-          let eventType = "message";
-          let data = "";
-
-          for (const line of part.split("\n")) {
-            if (line.startsWith("event:")) {
-              eventType = line.slice(6).trim();
-            } else if (line.startsWith("data:")) {
-              data = line.slice(5).trim();
-            }
-          }
-
-          if (eventType === "done") {
-            onDone();
-            return;
-          }
-
-          if (eventType === "error") {
-            onError(data);
-            return;
-          }
-
-          onEvent(eventType, data);
+        if (event === "done") {
+          terminated = true;
+          onDone();
+        } else if (event === "error") {
+          terminated = true;
+          onError(data);
+        } else {
+          onEvent(event, data);
         }
-      }
+      });
 
-      onDone();
+      if (!terminated) onDone();
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       onError(err instanceof Error ? err.message : String(err));
