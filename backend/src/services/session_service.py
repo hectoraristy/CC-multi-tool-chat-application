@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import json
 
-from api.models import (
-    MessageResponse,
-    SessionResponse,
-    ToolResultResponse,
-)
+from api.models import MessageResponse, SessionResponse, ToolResultResponse
 from exceptions import NotFoundError
 from storage.models import ChatMessage, Session, ToolResultMetadata
 from storage.protocols import SessionRepository, Store

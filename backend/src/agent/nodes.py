@@ -26,6 +26,7 @@ def set_store(store: Store) -> None:
     global _store
     _store = store
 
+
 SUMMARIZE_SYSTEM_PROMPT = (
     "You are a summarization assistant. Condense the following tool output "
     "into a concise summary that preserves the key information. "
@@ -89,10 +90,7 @@ def summarize_node(state: AgentState) -> dict[str, list[BaseMessage]]:
     )
 
     summarized = ToolMessage(
-        content=(
-            f"[Summarized — full result stored as {result_id}] "
-            f"{summary_resp.content}"
-        ),
+        content=(f"[Summarized — full result stored as {result_id}] " f"{summary_resp.content}"),
         tool_call_id=last_tool_msg.tool_call_id,
         name=last_tool_msg.name,
     )

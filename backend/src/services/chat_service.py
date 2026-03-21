@@ -31,9 +31,7 @@ def build_langchain_messages(
     def _flush_tool_calls() -> None:
         if not pending_tool_calls:
             return
-        lc_messages.append(
-            AIMessage(content="", tool_calls=list(pending_tool_calls))
-        )
+        lc_messages.append(AIMessage(content="", tool_calls=list(pending_tool_calls)))
         pending_tool_calls.clear()
 
     for m in stored_messages:
