@@ -22,22 +22,22 @@ variable "backend_image_tag" {
   default     = "latest"
 }
 
+variable "frontend_image_tag" {
+  description = "Docker image tag for the frontend"
+  type        = string
+  default     = "latest"
+}
+
 variable "backend_cpu" {
-  description = "CPU units for backend Fargate task"
-  type        = number
-  default     = 512
+  description = "CPU units for backend App Runner service"
+  type        = string
+  default     = "512"
 }
 
 variable "backend_memory" {
-  description = "Memory (MiB) for backend Fargate task"
-  type        = number
-  default     = 1024
-}
-
-variable "backend_desired_count" {
-  description = "Number of backend task instances"
-  type        = number
-  default     = 1
+  description = "Memory (MiB) for backend App Runner service"
+  type        = string
+  default     = "1024"
 }
 
 variable "secrets_manager_secret_arn" {
