@@ -34,6 +34,7 @@ export function ChatWindow({ sessionId }: Props) {
         messages={messages}
         streamingContent={streamingContent}
         streaming={streaming}
+        sessionId={sessionId}
       />
 
       <MessageInput

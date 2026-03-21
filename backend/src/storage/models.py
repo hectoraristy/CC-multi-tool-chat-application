@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
+
+T = TypeVar("T")
 
 
 def _utc_now() -> datetime:
@@ -15,13 +18,14 @@ class ToolResult(BaseModel):
     result_id: str
     tool_name: str
     summary: str
-    full_result: str
+    full_result: str = ""
+    s3_key: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
     size_bytes: int = 0
 
     def model_post_init(self, __context: Any) -> None:
-        if self.size_bytes == 0:
+        if self.size_bytes == 0 and self.full_result:
             self.size_bytes = len(self.full_result.encode("utf-8"))
 
 
@@ -32,6 +36,7 @@ class ToolResultMetadata(BaseModel):
     result_id: str
     tool_name: str
     summary: str
+    s3_key: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     size_bytes: int
@@ -52,3 +57,9 @@ class ChatMessage(BaseModel):
     tool_name: str | None = None
     tool_call_id: str | None = None
     created_at: datetime = Field(default_factory=_utc_now)
+
+
+@dataclass
+class PaginatedResult(Generic[T]):
+    items: list[T] = field(default_factory=list)
+    next_cursor: str | None = None

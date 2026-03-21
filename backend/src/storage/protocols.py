@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from storage.models import ChatMessage, Session, ToolResult, ToolResultMetadata
+from storage.models import ChatMessage, PaginatedResult, Session, ToolResult, ToolResultMetadata
 
 
 class SessionRepository(Protocol):
@@ -12,7 +12,11 @@ class SessionRepository(Protocol):
     def get_session(self, session_id: str) -> Session | None:
         ...
 
-    def list_sessions(self) -> list[Session]:
+    def list_sessions(
+        self,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> PaginatedResult[Session]:
         ...
 
     def update_session_title(self, session_id: str, title: str) -> Session | None:

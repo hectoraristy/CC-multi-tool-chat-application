@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from api.dependencies import get_store
 from api.models import (
+    DownloadUrlResponse,
     MessageResponse,
+    PaginatedSessionsResponse,
     SessionCreate,
     SessionResponse,
     SessionUpdate,
     ToolResultResponse,
 )
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import PlainTextResponse
 from services import session_service
 from storage.protocols import Store
 
@@ -23,11 +26,13 @@ def create_session(
     return session_service.create_session(store, title=body.title)
 
 
-@router.get("", response_model=list[SessionResponse])
+@router.get("", response_model=PaginatedSessionsResponse)
 def list_sessions(
+    limit: int = Query(20, ge=1, le=100),
+    cursor: str | None = Query(None),
     store: Store = Depends(get_store),
-) -> list[SessionResponse]:
-    return session_service.list_sessions(store)
+) -> PaginatedSessionsResponse:
+    return session_service.list_sessions(store, limit=limit, cursor=cursor)
 
 
 @router.patch("/{session_id}", response_model=SessionResponse)
@@ -61,3 +66,15 @@ def get_tool_results(
     store: Store = Depends(get_store),
 ) -> list[ToolResultResponse]:
     return session_service.get_tool_results(store, session_id)
+
+
+@router.get("/{session_id}/tool-results/{result_id}/download", response_model=None)
+def download_tool_result(
+    session_id: str,
+    result_id: str,
+    store: Store = Depends(get_store),
+) -> DownloadUrlResponse | PlainTextResponse:
+    download = session_service.get_download_result(store, session_id, result_id)
+    if download.url:
+        return DownloadUrlResponse(download_url=download.url)
+    return PlainTextResponse(content=download.content or "")

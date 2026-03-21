@@ -34,7 +34,3 @@ output "table_name" {
 output "table_arn" {
   value = aws_dynamodb_table.tool_results.arn
 }
-
-output "table_endpoint_url" {
-  value = aws_dynamodb_table.tool_results.endpoint_url
-}

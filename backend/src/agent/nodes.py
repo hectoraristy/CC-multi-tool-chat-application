@@ -4,27 +4,13 @@ import logging
 import uuid
 
 from agent.state import AgentState
+from api.dependencies import get_s3_store, get_store
 from config import get_settings
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
-from storage.dynamo import DynamoDBStore
+from langchain_core.messages import BaseMessage, ToolMessage
 from storage.models import ToolResult
-from storage.protocols import Store
+from storage.s3 import S3ResultStore
 
 logger = logging.getLogger(__name__)
-
-_store: Store | None = None
-
-
-def _get_store() -> Store:
-    global _store
-    if _store is None:
-        _store = DynamoDBStore()
-    return _store
-
-
-def set_store(store: Store) -> None:
-    global _store
-    _store = store
 
 
 SUMMARIZE_SYSTEM_PROMPT = (
@@ -65,15 +51,28 @@ def summarize_node(state: AgentState) -> dict[str, list[BaseMessage]]:
 
     session_id = state.get("session_id", "unknown")
     result_id = str(uuid.uuid4())
+    full_content = last_tool_msg.content
 
-    store = _get_store()
+    s3_key: str | None = None
+    stored_full_result = full_content
+
+    s3 = get_s3_store()
+    if s3 is not None:
+        s3_key = S3ResultStore.make_key(session_id, result_id)
+        s3.upload_result(s3_key, full_content)
+        stored_full_result = ""
+        logger.info("Uploaded large tool result %s to S3 key %s", result_id, s3_key)
+
+    store = get_store()
     store.store_tool_result(
         ToolResult(
             session_id=session_id,
             result_id=result_id,
             tool_name=last_tool_msg.name or "unknown",
-            summary=last_tool_msg.content[:500],
-            full_result=last_tool_msg.content,
+            summary=full_content[:500],
+            full_result=stored_full_result,
+            s3_key=s3_key,
+            size_bytes=len(full_content.encode("utf-8")),
             metadata={"auto_stored": True, "source": "summarize_node"},
         )
     )
@@ -85,7 +84,7 @@ def summarize_node(state: AgentState) -> dict[str, list[BaseMessage]]:
     summary_resp = llm.invoke(
         [
             SystemMessage(content=SUMMARIZE_SYSTEM_PROMPT),
-            HumanMessage(content=last_tool_msg.content),
+            HumanMessage(content=full_content),
         ]
     )
 
@@ -93,6 +92,7 @@ def summarize_node(state: AgentState) -> dict[str, list[BaseMessage]]:
         content=(f"[Summarized — full result stored as {result_id}] " f"{summary_resp.content}"),
         tool_call_id=last_tool_msg.tool_call_id,
         name=last_tool_msg.name,
+        id=last_tool_msg.id,
     )
 
     return {"messages": [summarized]}

@@ -7,8 +7,10 @@ from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
-    session_id: str
-    message: str
+    session_id: str = Field(
+        ..., pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    )
+    message: str = Field(..., min_length=1)
 
 
 class ChatEvent(BaseModel):
@@ -40,6 +42,7 @@ class MessageResponse(BaseModel):
     tool_name: str | None = None
     tool_call_id: str | None = None
     tool_args: dict[str, Any] | None = None
+    result_id: str | None = None
     created_at: datetime
 
 
@@ -49,4 +52,14 @@ class ToolResultResponse(BaseModel):
     summary: str
     metadata: dict[str, Any]
     size_bytes: int
+    has_full_result: bool = False
     created_at: datetime
+
+
+class PaginatedSessionsResponse(BaseModel):
+    items: list[SessionResponse]
+    next_cursor: str | None = None
+
+
+class DownloadUrlResponse(BaseModel):
+    download_url: str

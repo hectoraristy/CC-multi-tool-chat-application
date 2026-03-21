@@ -50,3 +50,9 @@ variable "llm_provider" {
   type        = string
   default     = "openai"
 }
+
+variable "s3_results_expiration_days" {
+  description = "Days before tool result objects in S3 are automatically deleted"
+  type        = number
+  default     = 30
+}

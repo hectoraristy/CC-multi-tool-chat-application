@@ -38,13 +38,33 @@ export async function deleteSession(sessionId: string): Promise<void> {
 export async function listSessions(): Promise<Session[]> {
   const res = await fetch(`${BASE_URL}/sessions`);
   if (!res.ok) throw new Error(`Failed to list sessions: ${res.statusText}`);
-  return res.json();
+  const body = await res.json();
+  return body.items;
 }
 
 export async function getMessages(sessionId: string): Promise<ChatMessage[]> {
   const res = await fetch(`${BASE_URL}/sessions/${sessionId}/messages`);
   if (!res.ok) throw new Error(`Failed to get messages: ${res.statusText}`);
   return res.json();
+}
+
+export async function getToolResultDownloadUrl(
+  sessionId: string,
+  resultId: string
+): Promise<string> {
+  const res = await fetch(
+    `${BASE_URL}/sessions/${sessionId}/tool-results/${resultId}/download`
+  );
+  if (!res.ok) throw new Error(`Failed to get download URL: ${res.statusText}`);
+
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const body = await res.json();
+    return body.download_url;
+  }
+
+  const text = await res.text();
+  return URL.createObjectURL(new Blob([text], { type: "text/plain" }));
 }
 
 export function streamChatSSE(

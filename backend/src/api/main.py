@@ -4,7 +4,6 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from agent.nodes import set_store as set_node_store
 from api.dependencies import get_graph, get_store
 from api.routes.chat import router as chat_router
 from api.routes.sessions import router as sessions_router
@@ -15,7 +14,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from logging_config import setup_logging
 from starlette.requests import Request
-from tools.session_manager import set_store as set_tool_store
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +21,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
-    store = get_store()
+    get_store()
     get_graph()
-    set_tool_store(store)
-    set_node_store(store)
     logger.info("Application startup complete")
     yield
 

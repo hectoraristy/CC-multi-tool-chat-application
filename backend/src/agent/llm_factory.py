@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from functools import lru_cache
+
 from config import get_settings
 from langchain_core.language_models.chat_models import BaseChatModel
 
 
+@lru_cache
 def create_llm() -> BaseChatModel:
     settings = get_settings()
     provider = settings.llm_provider.lower()
