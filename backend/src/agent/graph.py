@@ -8,8 +8,10 @@ from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 from tools import ALL_TOOLS
 
-SYSTEM_PROMPT = (
-    "You are a helpful multi-tool AI assistant. You have access to several tools:\n"
+SYSTEM_PROMPT_TEMPLATE = (
+    "You are a helpful multi-tool AI assistant. "
+    "The current session ID is: {session_id}\n\n"
+    "You have access to several tools:\n"
     "- session_manager: Store, retrieve, or list tool results persisted in the session.\n"
     "- database_query: Run read-only SQL queries.\n"
     "- web_download: Fetch web page content.\n"
@@ -18,6 +20,10 @@ SYSTEM_PROMPT = (
     "When a tool returns a large result, use the session_manager to store it and "
     "refer to the stored result by ID in future turns. Only retrieve the full content "
     "when the user specifically needs it.\n\n"
+    "At the start of a conversation, if prior messages reference stored results or "
+    "you suspect relevant data was previously stored, use session_manager with "
+    "action='list' to check what is available before re-fetching.\n\n"
+    "Always pass the session ID shown above when calling session_manager.\n\n"
     "Always be concise and helpful."
 )
 
@@ -29,9 +35,12 @@ def _agent_node(state: AgentState) -> dict[str, list[BaseMessage]]:
     messages = state["messages"]
     from langchain_core.messages import SystemMessage
 
+    session_id = state.get("session_id", "unknown")
+    prompt = SYSTEM_PROMPT_TEMPLATE.format(session_id=session_id)
+
     has_system = any(isinstance(m, SystemMessage) for m in messages)
     if not has_system:
-        messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
+        messages = [SystemMessage(content=prompt)] + list(messages)
 
     response = llm_with_tools.invoke(messages)
     return {"messages": [response]}

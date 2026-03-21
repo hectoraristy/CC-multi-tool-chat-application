@@ -51,22 +51,43 @@ async def chat(body: ChatRequest) -> EventSourceResponse:
     )
 
     stored_messages = store.get_messages(body.session_id)
-    lc_messages = []
+    lc_messages: list[HumanMessage | AIMessage | ToolMessage] = []
+    pending_tool_calls: list[dict] = []
+
+    def _flush_tool_calls() -> None:
+        """Merge consecutive tool_call rows into a single AIMessage."""
+        if not pending_tool_calls:
+            return
+        lc_messages.append(
+            AIMessage(content="", tool_calls=list(pending_tool_calls))
+        )
+        pending_tool_calls.clear()
+
     for m in stored_messages:
         if m.role == "tool_call":
-            continue
-        elif m.role == "user":
-            lc_messages.append(HumanMessage(content=m.content))
-        elif m.role == "assistant":
-            lc_messages.append(AIMessage(content=m.content))
-        elif m.role == "tool":
-            lc_messages.append(
-                ToolMessage(
-                    content=m.content,
-                    tool_call_id=m.tool_call_id or "",
-                    name=m.tool_name or "unknown",
-                )
+            pending_tool_calls.append(
+                {
+                    "name": m.tool_name or "unknown",
+                    "args": json.loads(m.content) if m.content else {},
+                    "id": m.tool_call_id or "",
+                }
             )
+        else:
+            _flush_tool_calls()
+            if m.role == "user":
+                lc_messages.append(HumanMessage(content=m.content))
+            elif m.role == "assistant":
+                lc_messages.append(AIMessage(content=m.content))
+            elif m.role == "tool":
+                lc_messages.append(
+                    ToolMessage(
+                        content=m.content,
+                        tool_call_id=m.tool_call_id or "",
+                        name=m.tool_name or "unknown",
+                    )
+                )
+
+    _flush_tool_calls()
 
     async def event_generator():  # noqa: ANN202
         graph = _get_graph()
@@ -108,6 +129,16 @@ async def chat(body: ChatRequest) -> EventSourceResponse:
                                     "data": msg.content,
                                 }
                         elif isinstance(msg, ToolMessage):
+                            store.store_message(
+                                ChatMessage(
+                                    session_id=body.session_id,
+                                    message_id=str(uuid.uuid4()),
+                                    role="tool",
+                                    content=msg.content or "",
+                                    tool_name=msg.name or "unknown",
+                                    tool_call_id=getattr(msg, "tool_call_id", "") or "",
+                                )
+                            )
                             summary = msg.content[:500] if msg.content else ""
                             yield {
                                 "event": "tool_result",

@@ -29,10 +29,11 @@ export function ChatWindow({ sessionId }: Props) {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-background h-full">
+    <div className="flex-1 flex flex-col bg-background h-full min-h-0">
       <MessageList
         messages={messages}
         streamingContent={streamingContent}
+        streaming={streaming}
       />
 
       <MessageInput
