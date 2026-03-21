@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from agent.state import AgentState
 from config import get_settings
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from storage.dynamo import DynamoDBStore
+from storage.models import ToolResult
 
 logger = logging.getLogger(__name__)
+
+_store: DynamoDBStore | None = None
+
+
+def _get_store() -> DynamoDBStore:
+    global _store
+    if _store is None:
+        _store = DynamoDBStore()
+    return _store
 
 SUMMARIZE_SYSTEM_PROMPT = (
     "You are a summarization assistant. Condense the following tool output "
@@ -44,6 +56,22 @@ def summarize_node(state: AgentState) -> dict[str, list[BaseMessage]]:
     last_tool_msg = messages[-1]
     assert isinstance(last_tool_msg, ToolMessage)
 
+    session_id = state.get("session_id", "unknown")
+    result_id = str(uuid.uuid4())
+
+    store = _get_store()
+    store.store_tool_result(
+        ToolResult(
+            session_id=session_id,
+            result_id=result_id,
+            tool_name=last_tool_msg.name or "unknown",
+            summary=last_tool_msg.content[:500],
+            full_result=last_tool_msg.content,
+            metadata={"auto_stored": True, "source": "summarize_node"},
+        )
+    )
+    logger.info("Auto-stored large tool result %s before summarization", result_id)
+
     llm = create_llm()
     from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -55,7 +83,10 @@ def summarize_node(state: AgentState) -> dict[str, list[BaseMessage]]:
     )
 
     summarized = ToolMessage(
-        content=f"[Summarized] {summary_resp.content}",
+        content=(
+            f"[Summarized — full result stored as {result_id}] "
+            f"{summary_resp.content}"
+        ),
         tool_call_id=last_tool_msg.tool_call_id,
         name=last_tool_msg.name,
     )
