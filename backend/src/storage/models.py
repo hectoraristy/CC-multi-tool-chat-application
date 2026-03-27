@@ -23,6 +23,8 @@ class ToolResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
     size_bytes: int = 0
+    total_chunks: int = 0
+    chunk_size_chars: int = 0
 
     def model_post_init(self, __context: Any) -> None:
         if self.size_bytes == 0 and self.full_result:
@@ -56,6 +58,23 @@ class ChatMessage(BaseModel):
     content: str
     tool_name: str | None = None
     tool_call_id: str | None = None
+    created_at: datetime = Field(default_factory=_utc_now)
+
+
+class ConversationSummary(BaseModel):
+    session_id: str
+    content: str = ""
+    s3_key: str | None = None
+    message_count: int = 0
+    updated_at: datetime = Field(default_factory=_utc_now)
+
+
+class UserFact(BaseModel):
+    user_id: str
+    fact_id: str
+    content: str
+    category: str = "general"
+    source_session: str = ""
     created_at: datetime = Field(default_factory=_utc_now)
 
 

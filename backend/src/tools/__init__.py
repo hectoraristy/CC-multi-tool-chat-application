@@ -1,3 +1,4 @@
+from tools.data_analysis import data_analysis
 from tools.database_query import database_query
 from tools.external_api import external_api
 from tools.file_source import file_source
@@ -10,6 +11,7 @@ ALL_TOOLS = [
     web_download,
     external_api,
     file_source,
+    data_analysis,
 ]
 
 __all__ = [
@@ -18,5 +20,6 @@ __all__ = [
     "web_download",
     "external_api",
     "file_source",
+    "data_analysis",
     "ALL_TOOLS",
 ]

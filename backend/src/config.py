@@ -23,7 +23,13 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     log_level: str = "INFO"
 
-    summarize_token_threshold: int = 4000
+    chunk_token_budget: int = 10_000
+
+    # Should be below your org's TPM limit with headroom for the LLM response.
+    max_context_tokens: int = 25_000
+    recent_turns_to_preserve: int = 5
+
+    user_id: str = "default"
 
     s3_results_bucket: str = ""
     s3_presigned_url_expiry: int = 3600

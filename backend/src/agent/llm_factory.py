@@ -19,6 +19,8 @@ def create_llm() -> BaseChatModel:
                 model=settings.openai_model,
                 api_key=settings.openai_api_key,
                 streaming=True,
+                max_retries=5,
+                request_timeout=120,
             )
         case "anthropic":
             from langchain_anthropic import ChatAnthropic

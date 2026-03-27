@@ -10,18 +10,28 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 from config import get_settings
-from storage.models import ChatMessage, PaginatedResult, Session, ToolResult, ToolResultMetadata
+from storage.models import (
+    ChatMessage,
+    ConversationSummary,
+    PaginatedResult,
+    Session,
+    ToolResult,
+    ToolResultMetadata,
+    UserFact,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class DynamoDBStore:
-    """DynamoDB-backed storage for sessions, messages, and tool results.
+    """DynamoDB-backed storage for sessions, messages, tool results, summaries, and user facts.
 
     Uses a single-table design with PK/SK patterns:
       - Session:     PK=SESSION#{session_id}  SK=META
       - Message:     PK=SESSION#{session_id}  SK=MSG#{timestamp}#{message_id}
       - ToolResult:  PK=SESSION#{session_id}  SK=RESULT#{result_id}
+      - Summary:     PK=SESSION#{session_id}  SK=SUMMARY#latest
+      - UserFact:    PK=USER#{user_id}        SK=FACT#{fact_id}
     """
 
     def __init__(self) -> None:
@@ -221,6 +231,8 @@ class DynamoDBStore:
             "metadata": json.dumps(result.metadata),
             "created_at": result.created_at.isoformat(),
             "size_bytes": result.size_bytes,
+            "total_chunks": result.total_chunks,
+            "chunk_size_chars": result.chunk_size_chars,
         }
         if result.s3_key:
             item["s3_key"] = result.s3_key
@@ -243,6 +255,8 @@ class DynamoDBStore:
             metadata=json.loads(item.get("metadata", "{}")),
             created_at=datetime.fromisoformat(item["created_at"]),
             size_bytes=int(item["size_bytes"]),
+            total_chunks=int(item.get("total_chunks", 0)),
+            chunk_size_chars=int(item.get("chunk_size_chars", 0)),
         )
 
     def list_tool_results(self, session_id: str) -> list[ToolResultMetadata]:
@@ -273,3 +287,109 @@ class DynamoDBStore:
             )
         results.sort(key=lambda r: r.created_at, reverse=True)
         return results
+
+    # ── Conversation Summaries ─────────────────────────────────────────
+
+    def store_summary(self, summary: ConversationSummary) -> None:
+        content = summary.content
+        s3_key = summary.s3_key
+
+        # DynamoDB 400KB limit -- offload large summaries to S3
+        if len(content.encode("utf-8")) > 300_000:
+            from api.dependencies import get_s3_store
+            from storage.s3 import S3ResultStore
+
+            s3 = get_s3_store()
+            if s3 is not None:
+                s3_key = S3ResultStore.make_summary_key(summary.session_id)
+                s3.upload_result(s3_key, content)
+                content = content[:500]
+                logger.info(
+                    "Offloaded large summary for session %s to S3 key %s",
+                    summary.session_id,
+                    s3_key,
+                )
+
+        item: dict[str, Any] = {
+            "PK": f"SESSION#{summary.session_id}",
+            "SK": "SUMMARY#latest",
+            "session_id": summary.session_id,
+            "content": content,
+            "message_count": summary.message_count,
+            "updated_at": summary.updated_at.isoformat(),
+        }
+        if s3_key:
+            item["s3_key"] = s3_key
+        self._table.put_item(Item=item)
+
+    def get_summary(self, session_id: str) -> ConversationSummary | None:
+        resp = self._table.get_item(
+            Key={"PK": f"SESSION#{session_id}", "SK": "SUMMARY#latest"}
+        )
+        item = resp.get("Item")
+        if not item:
+            return None
+
+        content = item.get("content", "")
+        s3_key = item.get("s3_key")
+
+        # If content was offloaded to S3, download the full text
+        if s3_key:
+            from api.dependencies import get_s3_store
+
+            s3 = get_s3_store()
+            if s3 is not None:
+                try:
+                    content = s3.download_result(s3_key)
+                except Exception:
+                    logger.warning(
+                        "Failed to download summary from S3 key %s, using DynamoDB content",
+                        s3_key,
+                    )
+
+        return ConversationSummary(
+            session_id=item["session_id"],
+            content=content,
+            s3_key=s3_key,
+            message_count=int(item.get("message_count", 0)),
+            updated_at=datetime.fromisoformat(item["updated_at"]),
+        )
+
+    # ── User Facts ─────────────────────────────────────────────────────
+
+    def store_user_fact(self, fact: UserFact) -> None:
+        self._table.put_item(
+            Item={
+                "PK": f"USER#{fact.user_id}",
+                "SK": f"FACT#{fact.fact_id}",
+                "user_id": fact.user_id,
+                "fact_id": fact.fact_id,
+                "content": fact.content,
+                "category": fact.category,
+                "source_session": fact.source_session,
+                "created_at": fact.created_at.isoformat(),
+            }
+        )
+
+    def get_user_facts(self, user_id: str) -> list[UserFact]:
+        resp = self._table.query(
+            KeyConditionExpression="PK = :pk AND begins_with(SK, :prefix)",
+            ExpressionAttributeValues={
+                ":pk": f"USER#{user_id}",
+                ":prefix": "FACT#",
+            },
+        )
+        facts = []
+        for item in resp.get("Items", []):
+            facts.append(
+                UserFact(
+                    user_id=item["user_id"],
+                    fact_id=item["fact_id"],
+                    content=item["content"],
+                    category=item.get("category", "general"),
+                    source_session=item.get("source_session", ""),
+                    created_at=datetime.fromisoformat(item["created_at"]),
+                )
+            )
+        facts.sort(key=lambda f: f.created_at)
+        return facts

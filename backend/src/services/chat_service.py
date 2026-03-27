@@ -5,8 +5,9 @@ import logging
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
+from config import get_settings
 from constants import RESULT_ID_RE
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from services.persistence import (
     flush_pending_tool_msgs,
     persist_assistant_message,
@@ -31,15 +32,29 @@ async def stream_agent_events(
     store: Store,
     session_id: str,
     lc_messages: list[BaseMessage],
+    *,
+    stored_result_ids: list[str] | None = None,
+    tools_used_this_session: list[str] | None = None,
+    turn_count: int = 0,
+    user_facts: list[str] | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """Run the agent graph and yield SSE-ready dicts."""
-    state = {"messages": lc_messages, "session_id": session_id}
+    state: dict[str, object] = {
+        "messages": lc_messages,
+        "session_id": session_id,
+        "stored_result_ids": stored_result_ids or [],
+        "tools_used_this_session": tools_used_this_session or [],
+        "turn_count": turn_count,
+        "user_facts": user_facts or [],
+    }
     full_response = ""
     pending_tool_msgs: dict[str, ToolMessage] = {}
 
     try:
         for event in graph.stream(state, stream_mode="updates"):
             for _node_name, node_output in event.items():
+                if not node_output:
+                    continue
                 msgs = node_output.get("messages", [])
                 for msg in msgs:
                     if isinstance(msg, AIMessage):
@@ -91,5 +106,29 @@ async def stream_agent_events(
 
     if full_response:
         persist_assistant_message(store, session_id, full_response)
+
+        # Extract durable user facts from this turn (fire-and-forget)
+        try:
+            last_user_content = ""
+            for msg in reversed(lc_messages):
+                if isinstance(msg, HumanMessage):
+                    last_user_content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    break
+
+            if last_user_content:
+                from agent.llm_factory import create_llm
+                from services.memory import extract_and_store_facts
+
+                settings = get_settings()
+                extract_and_store_facts(
+                    llm=create_llm(),
+                    store=store,
+                    user_id=settings.user_id,
+                    session_id=session_id,
+                    user_message=last_user_content,
+                    assistant_message=full_response,
+                )
+        except Exception:
+            logger.debug("Fact extraction failed (non-critical)", exc_info=True)
 
     yield {"event": "done", "data": ""}
