@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from storage.models import ToolResultMetadata
-
 _BASE_IDENTITY = "You are a helpful multi-tool AI assistant."
 
 _CHUNKING_INSTRUCTIONS = (
@@ -74,24 +72,6 @@ _TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
 }
 
 
-def _format_results_inventory(stored_results: list[ToolResultMetadata]) -> str:
-    if not stored_results:
-        return ""
-    lines = ["Previously stored results in this session:"]
-    for r in stored_results[:20]:
-        size_label = (
-            f"{r.size_bytes / 1024:.1f}KB" if r.size_bytes >= 1024
-            else f"{r.size_bytes}B"
-        )
-        summary_preview = r.summary[:80].replace("\n", " ") if r.summary else ""
-        lines.append(f"  - {r.result_id} ({r.tool_name}, {size_label}): {summary_preview}")
-    lines.append(
-        "Use session_manager with action='get_download_url' and the result_id "
-        "to generate a temporary download URL when the user requests one."
-    )
-    return "\n".join(lines)
-
-
 def _format_tool_instructions(tools_used: list[str]) -> str:
     """Full descriptions for tools already used; one-liners for the rest."""
     lines = ["Available tools:"]
@@ -105,11 +85,9 @@ def _format_tool_instructions(tools_used: list[str]) -> str:
 
 def build_system_prompt(
     session_id: str,
-    stored_results: list[ToolResultMetadata] | None = None,
     tools_used: list[str] | None = None,
     user_facts: list[str] | None = None,
 ) -> str:
-    """Assemble a dynamic system prompt from contextual sections."""
     sections: list[str] = [_BASE_IDENTITY]
 
     sections.append(f"The current session ID is: {session_id}")
@@ -117,10 +95,6 @@ def build_system_prompt(
     if user_facts:
         facts_block = "\n".join(f"- {f}" for f in user_facts)
         sections.append(f"Known user context:\n{facts_block}")
-
-    inventory = _format_results_inventory(stored_results or [])
-    if inventory:
-        sections.append(inventory)
 
     sections.append(_format_tool_instructions(tools_used or []))
     sections.append(_CHUNKING_INSTRUCTIONS)

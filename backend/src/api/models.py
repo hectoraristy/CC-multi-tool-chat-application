@@ -27,13 +27,6 @@ class ChatRequest(BaseModel):
     attachments: list[FileAttachment] | None = None
 
 
-class ChatEvent(BaseModel):
-    """Individual SSE event sent during streaming."""
-
-    event: str  # "token" | "tool_call" | "tool_result" | "done" | "error"
-    data: str
-
-
 class SessionCreate(BaseModel):
     title: str = "New Chat"
 

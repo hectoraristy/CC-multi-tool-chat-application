@@ -67,7 +67,6 @@ async def upload_file(
 
 
 def _build_attachment_context(body: ChatRequest) -> str | None:
-    """Build a context string describing uploaded files for the LLM."""
     if not body.attachments:
         return None
     lines: list[str] = []
@@ -98,7 +97,6 @@ async def chat(
 
     settings = get_settings()
 
-    tool_results = store.list_tool_results(body.session_id)
     tools_used = list({
         m.tool_name for m in stored_messages
         if m.role in ("tool_call", "tool") and m.tool_name
@@ -113,7 +111,6 @@ async def chat(
             store,
             body.session_id,
             lc_messages,
-            stored_result_ids=[r.result_id for r in tool_results],
             tools_used_this_session=tools_used,
             turn_count=len(stored_messages),
             user_facts=user_facts,

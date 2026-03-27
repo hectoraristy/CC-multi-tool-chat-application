@@ -123,10 +123,10 @@ terraform apply
 │       │       ├── chat.py      # POST /api/chat (SSE streaming) + POST /api/chat/upload (file upload)
 │       │       └── sessions.py  # Session CRUD, messages, tool results
 │       ├── agent/
-│       │   ├── state.py         # AgentState TypedDict (messages, session_id, summary, facts, etc.)
+│       │   ├── state.py         # AgentState TypedDict (messages, session_id, facts, turn count, etc.)
 │       │   ├── graph.py         # LangGraph graph: router → plan → agent → tools (chunking) → evaluate
 │       │   ├── nodes.py         # plan_node, evaluate_node
-│       │   ├── prompt_builder.py # Dynamic system prompt (facts, tool inventory, chunking instructions)
+│       │   ├── prompt_builder.py # Dynamic system prompt (facts, tool instructions, chunking instructions)
 │       │   └── llm_factory.py   # create_llm() — OpenAI, Anthropic, or Bedrock
 │       ├── services/
 │       │   ├── chat_service.py      # stream_agent_events() — runs graph, yields SSE
@@ -137,10 +137,10 @@ terraform apply
 │       │   ├── message_converter.py # Stored messages → LangChain message format
 │       │   └── persistence.py       # Persist user/assistant/tool messages
 │       ├── storage/
-│       │   ├── protocols.py     # Repository protocols (Session, Message, ToolResult, Summary, UserFact)
-│       │   ├── models.py        # Domain models (Session, ChatMessage, ToolResult, ConversationSummary, UserFact)
+│       │   ├── protocols.py     # Repository protocols (Session, Message, ToolResult, UserFact)
+│       │   ├── models.py        # Domain models (Session, ChatMessage, ToolResult, UserFact)
 │       │   ├── dynamo.py        # DynamoDB single-table implementation
-│       │   └── s3.py            # S3 offload for large tool results and summaries
+│       │   └── s3.py            # S3 offload for large tool results
 │       └── tools/
 │           ├── __init__.py          # Exports ALL_TOOLS
 │           ├── session_manager.py   # Store/retrieve/list/download/get_chunk tool results
@@ -171,7 +171,7 @@ terraform apply
 │       │   ├── StreamingIndicator.tsx   # Streaming status indicator
 │       │   ├── ThinkingIndicator.tsx    # Agent thinking indicator
 │       │   ├── ErrorBoundary.tsx        # React error boundary
-│       │   └── ui/                      # shadcn/ui primitives (button, input, card, etc.)
+│       │   └── ui/                      # shadcn/ui primitives (button, input, badge, etc.)
 │       ├── hooks/
 │       │   ├── useSessions.ts       # Session CRUD (list, create, select, update, delete)
 │       │   ├── useChat.ts           # Chat state and send message
@@ -185,7 +185,7 @@ terraform apply
 │       │   ├── utils.ts             # cn() — tailwind-merge + clsx
 │       │   └── queryKeys.ts         # TanStack Query cache key factories
 │       └── types/
-│           └── index.ts             # Session, ChatMessage, ToolCall, StreamEvent types
+│           └── index.ts             # Session, ChatMessage, FileAttachment, ToolCall types
 ├── infra/                   # Terraform (AWS)
 │   ├── main.tf              # Root module: ECR, DynamoDB, S3, IAM, App Runner
 │   ├── variables.tf         # Input variables
@@ -238,7 +238,7 @@ Copy `.env.example` to `.env` and configure:
 | `AWS_REGION` | `us-east-1` | AWS region for DynamoDB and S3 |
 | `DYNAMODB_TABLE_NAME` | `tool_results` | DynamoDB table name |
 | `DYNAMODB_ENDPOINT_URL` | `http://localhost:8000` | DynamoDB endpoint (use local for development) |
-| `S3_RESULTS_BUCKET` | — | S3 bucket for offloading large tool results and summaries |
+| `S3_RESULTS_BUCKET` | — | S3 bucket for offloading large tool results and file uploads |
 | `S3_PRESIGNED_URL_EXPIRY` | `3600` | Presigned URL expiry in seconds |
 | `CHUNK_TOKEN_BUDGET` | `10000` | Token budget per chunk when auto-chunking large tool results |
 | `MAX_CONTEXT_TOKENS` | `25000` | Maximum token budget for conversation context sent to the LLM |

@@ -11,8 +11,6 @@ from tools.file_source import _read_raw
 
 logger = logging.getLogger(__name__)
 
-MAX_RESULT_ROWS = 100
-
 
 def _load_csv(path: str) -> pd.DataFrame:
     raw = _read_raw(path)

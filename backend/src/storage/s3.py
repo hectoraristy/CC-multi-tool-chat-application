@@ -22,14 +22,6 @@ class S3ResultStore:
     def make_key(session_id: str, result_id: str) -> str:
         return f"results/{session_id}/{result_id}.txt"
 
-    @staticmethod
-    def make_summary_key(session_id: str) -> str:
-        return f"summaries/{session_id}/latest.txt"
-
-    @staticmethod
-    def make_user_facts_key(user_id: str) -> str:
-        return f"users/{user_id}/facts.json"
-
     def upload_result(self, key: str, content: str) -> None:
         self._client.put_object(
             Bucket=self._bucket,

@@ -61,14 +61,6 @@ class ChatMessage(BaseModel):
     created_at: datetime = Field(default_factory=_utc_now)
 
 
-class ConversationSummary(BaseModel):
-    session_id: str
-    content: str = ""
-    s3_key: str | None = None
-    message_count: int = 0
-    updated_at: datetime = Field(default_factory=_utc_now)
-
-
 class UserFact(BaseModel):
     user_id: str
     fact_id: str

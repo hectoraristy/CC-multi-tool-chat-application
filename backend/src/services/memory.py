@@ -39,7 +39,6 @@ def extract_and_store_facts(
     user_message: str,
     assistant_message: str,
 ) -> list[UserFact]:
-    """Extract durable user facts from the latest turn and persist new ones."""
     turn_text = f"User: {user_message}\nAssistant: {assistant_message}"
 
     try:

@@ -25,8 +25,8 @@ This document describes the architecture, key technical decisions, trade-offs, a
                              │  │  ┌──────────────┐  ┌────────────────┐  │    │
                              │  │  │ Prompt Builder│  │ Tools          │  │    │
                              │  │  │ (system prompt│  │  Session Mgr   │  │    │
-                             │  │  │  + user facts │  │  DB Query      │  │    │
-                             │  │  │  + inventory) │  │  Web Download  │  │    │
+                             │  │  │  + user facts)│  │  DB Query      │  │    │
+                             │  │  │               │  │  Web Download  │  │    │
                              │  │  └──────────────┘  │  External API  │  │    │
                              │  │                     │  File Source   │  │    │
                              │  │                     │  Data Analysis │  │    │
@@ -52,8 +52,8 @@ This document describes the architecture, key technical decisions, trade-offs, a
                             │                  │ │  + uploads)    │
                             │ Sessions, Msgs,  │ │                │
                             │ Tool Results,    │ │ results/{id}/  │
-                            │ Summaries,       │ │ uploads/       │
-                            │ User Facts       │ │                │
+                            │ User Facts       │ │ uploads/       │
+                            │                  │ │                │
                             └──────────────────┘ └────────────────┘
 ```
 
@@ -66,10 +66,10 @@ This document describes the architecture, key technical decisions, trade-offs, a
 | Agent | LangGraph | Orchestration of LLM calls, tool routing, planning, evaluation, auto-chunking of large results |
 | Chunking Middleware | Python | Wraps the tool node; auto-stores and chunks results exceeding `CHUNK_TOKEN_BUDGET` |
 | Context Manager | Python, tiktoken | Token-aware context compaction (strips old chunk data, summarizes old messages) |
-| Prompt Builder | Python | Dynamic system prompt assembly with user facts, tool inventory, chunking instructions, and auto-storage warnings |
+| Prompt Builder | Python | Dynamic system prompt assembly with user facts, tool instructions, and chunking instructions |
 | Memory | Python | Cross-session user fact extraction via LLM and SHA256-based deduplication |
 | Tools | LangChain @tool decorator | Session Manager, DB Query, Web Download, External API, File Source, Data Analysis |
-| Storage | DynamoDB (single-table), S3 | Sessions, chat history, tool results, conversation summaries, user facts, file uploads, large-content offloading |
+| Storage | DynamoDB (single-table), S3 | Sessions, chat history, tool results, user facts, file uploads, large-content offloading |
 | Infrastructure | Terraform | App Runner, ECR, DynamoDB, S3 |
 | Build System | Pants 2.23 | Monorepo build, test, lint, Docker packaging |
 
@@ -77,10 +77,10 @@ This document describes the architecture, key technical decisions, trade-offs, a
 
 1. **User sends a message** → Frontend POSTs to `/api/chat` with `session_id`, `message`, and optional `attachments` (file uploads). If the user attached a file, it was already uploaded via `POST /api/chat/upload` and the `s3://` URI is injected into the message.
 2. **Backend stores the user message** in DynamoDB, then loads the full conversation history and converts it to LangChain message format.
-3. **Enrichment** → The backend loads stored tool result IDs, tools already used in the session, and **user facts** from DynamoDB.
-4. **LangGraph agent is invoked** with the enriched state (messages, session ID, tool metadata, user facts, turn count).
+3. **Enrichment** → The backend loads tools already used in the session and **user facts** from DynamoDB.
+4. **LangGraph agent is invoked** with the enriched state (messages, session ID, tools used, user facts, turn count).
 5. **Router** → On the first turn (`turn_count <= 1`, no assistant message yet), routes to the **Plan Node**, which generates an internal bullet-point plan as a `SystemMessage`; subsequent turns skip directly to the **Agent Node**.
-6. **Agent Node** → If no system prompt exists in the messages, `build_system_prompt()` assembles one from the session ID, user facts, stored results inventory, tool instructions, and chunking instructions. `compact_chunked_messages()` then ensures the message list fits within `MAX_CONTEXT_TOKENS` by stripping old chunk data and summarizing old messages. The LLM is invoked with bound tools.
+6. **Agent Node** → If no system prompt exists in the messages, `build_system_prompt()` assembles one from the session ID, user facts, tool instructions, and chunking instructions. `compact_chunked_messages()` then ensures the message list fits within `MAX_CONTEXT_TOKENS` by stripping old chunk data and summarizing old messages. The LLM is invoked with bound tools.
 7. **If the LLM requests a tool call**, the `tools` node (wrapped in `ChunkingMiddleware`) executes it. If the result exceeds `CHUNK_TOKEN_BUDGET` tokens, the middleware auto-stores the full result in DynamoDB (+ S3 for results >100KB) and replaces the `ToolMessage` with chunk 1 plus an annotation header. The agent can retrieve subsequent chunks via `session_manager(action='get_chunk')`.
 8. **Evaluate Node** → After every tool execution, the evaluate node routes back to the **Agent** unconditionally, letting the agent LLM itself decide whether to make more tool calls or produce a final response. This avoids a separate evaluation LLM call per loop iteration.
 9. **Streaming**: Each step emits SSE events (`token`, `tool_call`, `tool_result`, `error`, `done`). Internal `session_manager` tool calls are hidden from the user-facing message list.
@@ -111,7 +111,6 @@ Results exceeding `S3_OFFLOAD_THRESHOLD` (100KB) are automatically offloaded to 
 | `SESSION#{id}` | `META` | Session metadata (title, timestamps) |
 | `SESSION#{id}` | `MSG#{iso_ts}#{msg_id}` | Chat messages (sorted by time) |
 | `SESSION#{id}` | `RESULT#{result_id}` | Tool results (metadata + full content or `s3_key` pointer) |
-| `SESSION#{id}` | `SUMMARY` | Conversation summary (content or `s3_key` pointer for large summaries) |
 | `USER#{user_id}` | `FACT#{fact_id}` | Durable user fact (content, category, source session) |
 
 ### 3.2 Context Window Management
@@ -147,9 +146,8 @@ The system prompt is assembled dynamically by `build_system_prompt()` in `agent/
 1. **Base identity**: "You are a helpful multi-tool AI assistant."
 2. **Session ID**: Included so the agent can pass it to `session_manager` calls.
 3. **Known user context**: Bullet list of user facts loaded from DynamoDB (if any).
-4. **Stored results inventory**: Up to 20 previously stored tool results with IDs, tool names, sizes, and summary previews — enabling the agent to reference past results without loading their full content.
-5. **Tool instructions**: Full descriptions for tools already used in the session; concise one-liners for the rest. Includes `data_analysis` as the preferred tool for analytical follow-up queries on large files.
-6. **Chunking instructions**: Explains the auto-chunking annotation format (`[Chunked: result_id=..., chunk 1/N, ...]`), how to retrieve subsequent chunks via `session_manager(action='get_chunk')`, and when to use `data_analysis` for server-side computation instead of re-reading full files.
+4. **Tool instructions**: Full descriptions for tools already used in the session; concise one-liners for the rest. Includes `data_analysis` as the preferred tool for analytical follow-up queries on large files.
+5. **Chunking instructions**: Explains the auto-chunking annotation format (`[Chunked: result_id=..., chunk 1/N, ...]`), how to retrieve subsequent chunks via `session_manager(action='get_chunk')`, and when to use `data_analysis` for server-side computation instead of re-reading full files.
 
 ### 3.5 Planning and Evaluation Nodes
 
@@ -280,7 +278,7 @@ The trade-off is that cross-session queries (e.g., "find all sessions") require 
 | Auto-chunking of large tool results | Implemented | `ChunkingMiddleware` wraps tool node; persists full result, sends chunk 1 to agent |
 | Context window management (compaction) | Implemented | `compact_chunked_messages()` with tiktoken counting; strips old chunk data, summarizes old messages |
 | Cross-session user memory (fact extraction) | Implemented | LLM-based extraction after each turn; SHA256 deduplication; stored as `UserFact` in DynamoDB |
-| Dynamic prompt builder | Implemented | Assembles system prompt from facts, tool inventory, chunking instructions, stored results inventory |
+| Dynamic prompt builder | Implemented | Assembles system prompt from facts, tool instructions, and chunking instructions |
 | Planning node (first-turn strategy) | Implemented | Internal bullet-point plan on first turn before agent acts |
 | Evaluation node (loop control) | Implemented | Post-tool passthrough; always routes back to agent (no LLM call) |
 | Data analysis tool | Implemented | Server-side pandas analysis (describe, aggregate, query, filter, search, value_counts) |

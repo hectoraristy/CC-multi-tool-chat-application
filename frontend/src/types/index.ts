@@ -29,14 +29,3 @@ export interface ToolCall {
   args: Record<string, unknown>;
   id: string;
 }
-
-export interface ToolResult {
-  tool: string;
-  result_preview: string;
-  result_id?: string;
-}
-
-export interface StreamEvent {
-  event: "token" | "tool_call" | "tool_result" | "done" | "error";
-  data: string;
-}

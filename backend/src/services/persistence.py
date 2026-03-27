@@ -89,6 +89,5 @@ def validate_session_exists(
     store: SessionRepository,
     session_id: str,
 ) -> None:
-    """Raise ``NotFoundError`` if the session does not exist."""
     if store.get_session(session_id) is None:
         raise NotFoundError("Session", session_id)

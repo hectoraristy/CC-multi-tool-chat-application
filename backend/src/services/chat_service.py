@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_result_id(content: str) -> str | None:
-    """Return the result_id embedded in a ToolMessage, or None."""
     m = RESULT_ID_RE.search(content)
     return m.group(1) if m else None
 
@@ -33,16 +32,13 @@ async def stream_agent_events(
     session_id: str,
     lc_messages: list[BaseMessage],
     *,
-    stored_result_ids: list[str] | None = None,
     tools_used_this_session: list[str] | None = None,
     turn_count: int = 0,
     user_facts: list[str] | None = None,
 ) -> AsyncIterator[dict[str, str]]:
-    """Run the agent graph and yield SSE-ready dicts."""
     state: dict[str, object] = {
         "messages": lc_messages,
         "session_id": session_id,
-        "stored_result_ids": stored_result_ids or [],
         "tools_used_this_session": tools_used_this_session or [],
         "turn_count": turn_count,
         "user_facts": user_facts or [],

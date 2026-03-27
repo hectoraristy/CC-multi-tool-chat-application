@@ -24,7 +24,6 @@ def _agent_node(state: AgentState) -> dict[str, list[BaseMessage]]:
     if not has_system:
         prompt = build_system_prompt(
             session_id=session_id,
-            stored_results=None,
             tools_used=state.get("tools_used_this_session", []),
             user_facts=state.get("user_facts", []),
         )

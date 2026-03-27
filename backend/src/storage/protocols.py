@@ -4,7 +4,6 @@ from typing import Protocol
 
 from storage.models import (
     ChatMessage,
-    ConversationSummary,
     PaginatedResult,
     Session,
     ToolResult,
@@ -56,14 +55,6 @@ class ToolResultRepository(Protocol):
         ...
 
 
-class SummaryRepository(Protocol):
-    def get_summary(self, session_id: str) -> ConversationSummary | None:
-        ...
-
-    def store_summary(self, summary: ConversationSummary) -> None:
-        ...
-
-
 class UserFactRepository(Protocol):
     def store_user_fact(self, fact: UserFact) -> None:
         ...
@@ -76,7 +67,6 @@ class Store(
     SessionRepository,
     MessageRepository,
     ToolResultRepository,
-    SummaryRepository,
     UserFactRepository,
     Protocol,
 ):
