@@ -96,7 +96,10 @@ resource "aws_iam_role_policy" "s3_results_access" {
           "s3:PutObject",
           "s3:GetObject",
         ]
-        Resource = "${module.s3.bucket_arn}/results/*"
+        Resource = [
+          "${module.s3.bucket_arn}/results/*",
+          "${module.s3.bucket_arn}/uploads/*",
+        ]
       }
     ]
   })

@@ -1,56 +1,41 @@
 from __future__ import annotations
 
 from agent.llm_factory import create_llm
-from agent.nodes import should_summarize, summarize_node
+from agent.nodes import plan_node
+from agent.prompt_builder import build_system_prompt
 from agent.state import AgentState
-from langchain_core.messages import BaseMessage
+from config import get_settings
+from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
+from services.chunking import ChunkingMiddleware
+from services.context_manager import compact_chunked_messages
 from tools import ALL_TOOLS
-
-SYSTEM_PROMPT_TEMPLATE = (
-    "You are a helpful multi-tool AI assistant. "
-    "The current session ID is: {session_id}\n\n"
-    "You have access to several tools:\n"
-    "- session_manager: Store, retrieve, list, or get download URLs for tool results "
-    "persisted in the session.\n"
-    "- database_query: Run read-only SQL queries.\n"
-    "- web_download: Fetch web page content.\n"
-    "- external_api: Call external HTTP APIs.\n"
-    "- file_source: Read CSV/JSON files.\n\n"
-    "IMPORTANT — automatic storage of large results:\n"
-    "When a tool result is large, it is automatically stored and you will see a "
-    "message like '[Summarized — full result stored as <result_id>]' followed by "
-    "a summary. The FULL content is already saved under that result_id. "
-    "Do NOT call session_manager(action='store') again for these results — "
-    "doing so would only save the summary, not the full content.\n\n"
-    "Only use session_manager(action='store') for results that were NOT "
-    "automatically stored (i.e. results that do not contain the "
-    "'[Summarized — full result stored as ...]' marker).\n\n"
-    "When the user asks to download or get a link to a stored result, use "
-    "session_manager with action='get_download_url' and the result_id to generate "
-    "a temporary download URL. Share that URL directly with the user.\n\n"
-    "At the start of a conversation, if prior messages reference stored results or "
-    "you suspect relevant data was previously stored, use session_manager with "
-    "action='list' to check what is available before re-fetching.\n\n"
-    "Always pass the session ID shown above when calling session_manager.\n\n"
-    "Always be concise and helpful."
-)
 
 
 def _agent_node(state: AgentState) -> dict[str, list[BaseMessage]]:
     llm = create_llm()
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
-    messages = state["messages"]
-    from langchain_core.messages import SystemMessage
-
+    messages = list(state["messages"])
     session_id = state.get("session_id", "unknown")
-    prompt = SYSTEM_PROMPT_TEMPLATE.format(session_id=session_id)
 
     has_system = any(isinstance(m, SystemMessage) for m in messages)
     if not has_system:
-        messages = [SystemMessage(content=prompt)] + list(messages)
+        prompt = build_system_prompt(
+            session_id=session_id,
+            tools_used=state.get("tools_used_this_session", []),
+        )
+        messages = [SystemMessage(content=prompt)] + messages
+
+    settings = get_settings()
+    model = settings.openai_model if settings.llm_provider == "openai" else ""
+    messages = compact_chunked_messages(
+        messages,
+        max_tokens=settings.max_context_tokens,
+        recent_to_preserve=settings.recent_turns_to_preserve,
+        model=model,
+    )
 
     response = llm_with_tools.invoke(messages)
     return {"messages": [response]}
@@ -63,22 +48,38 @@ def _route_after_agent(state: AgentState) -> str:
     return END
 
 
+def _should_plan(state: AgentState) -> str:
+    """Route to the plan node on first turn, otherwise skip to agent."""
+    turn_count = state.get("turn_count", 0)
+    has_assistant = any(
+        not isinstance(m, (SystemMessage,)) and hasattr(m, "content")
+        and getattr(m, "type", "") == "ai"
+        for m in state.get("messages", [])
+    )
+    if turn_count <= 1 and not has_assistant:
+        return "plan"
+    return "agent"
+
+
 def build_graph() -> StateGraph:
     tool_node = ToolNode(ALL_TOOLS)
+    chunked_tools = ChunkingMiddleware(tool_node)
 
     graph = StateGraph(AgentState)
+    graph.add_node("plan", plan_node)
     graph.add_node("agent", _agent_node)
-    graph.add_node("tools", tool_node)
-    graph.add_node("summarize", summarize_node)
+    graph.add_node("tools", chunked_tools)
 
-    graph.set_entry_point("agent")
-
-    graph.add_conditional_edges("agent", _route_after_agent, {"tools": "tools", END: END})
+    graph.set_entry_point("router")
+    graph.add_node("router", lambda state: {})
     graph.add_conditional_edges(
-        "tools",
-        should_summarize,
-        {"summarize": "summarize", "agent": "agent"},
+        "router",
+        _should_plan,
+        {"plan": "plan", "agent": "agent"},
     )
-    graph.add_edge("summarize", "agent")
+
+    graph.add_edge("plan", "agent")
+    graph.add_conditional_edges("agent", _route_after_agent, {"tools": "tools", END: END})
+    graph.add_edge("tools", "agent")
 
     return graph.compile()

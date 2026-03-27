@@ -120,30 +120,34 @@ terraform apply
 │       │   ├── dependencies.py  # DI: get_store(), get_s3_store(), get_graph()
 │       │   ├── models.py        # Request/response Pydantic models
 │       │   └── routes/
-│       │       ├── chat.py      # POST /api/chat — SSE streaming endpoint
+│       │       ├── chat.py      # POST /api/chat (SSE streaming) + POST /api/chat/upload (file upload)
 │       │       └── sessions.py  # Session CRUD, messages, tool results
 │       ├── agent/
-│       │   ├── state.py         # AgentState TypedDict (messages, session_id)
-│       │   ├── graph.py         # LangGraph graph: agent → tools → summarize → agent
-│       │   ├── nodes.py         # should_summarize routing, summarize_node
+│       │   ├── state.py         # AgentState TypedDict (messages, session_id, turn count, etc.)
+│       │   ├── graph.py         # LangGraph graph: router → plan → agent ⇄ tools (chunking)
+│       │   ├── nodes.py         # plan_node
+│       │   ├── prompt_builder.py # Dynamic system prompt (tool instructions, chunking instructions)
 │       │   └── llm_factory.py   # create_llm() — OpenAI, Anthropic, or Bedrock
 │       ├── services/
 │       │   ├── chat_service.py      # stream_agent_events() — runs graph, yields SSE
+│       │   ├── chunking.py          # ChunkingMiddleware — auto-chunk large tool results with per-chunk S3 storage
+│       │   ├── context_manager.py   # Token-aware context compaction and message summarization
 │       │   ├── session_service.py   # Session CRUD operations
 │       │   ├── message_converter.py # Stored messages → LangChain message format
 │       │   └── persistence.py       # Persist user/assistant/tool messages
 │       ├── storage/
-│       │   ├── protocols.py     # Repository protocol interfaces (Session, Message, ToolResult)
+│       │   ├── protocols.py     # Repository protocols (Session, Message, ToolResult)
 │       │   ├── models.py        # Domain models (Session, ChatMessage, ToolResult)
 │       │   ├── dynamo.py        # DynamoDB single-table implementation
-│       │   └── s3.py            # S3 offload for large tool results
+│       │   └── s3.py            # S3 offload for large tool results + per-chunk object storage
 │       └── tools/
 │           ├── __init__.py          # Exports ALL_TOOLS
-│           ├── session_manager.py   # Store/retrieve/list/download tool results
+│           ├── session_manager.py   # Store/retrieve/list/download/get_chunk tool results
 │           ├── database_query.py    # Read-only SQL queries
 │           ├── web_download.py      # Fetch and parse web page content
 │           ├── external_api.py      # Generic HTTP API calls
-│           └── file_source.py       # Read CSV/JSON from local or S3
+│           ├── file_source.py       # Read CSV/JSON/PDF from local or S3
+│           └── data_analysis.py     # Server-side pandas analysis (describe, aggregate, query, etc.)
 ├── frontend/
 │   ├── Dockerfile           # Production build (Node → nginx)
 │   ├── Dockerfile.dev       # Dev image with Vite HMR
@@ -166,7 +170,7 @@ terraform apply
 │       │   ├── StreamingIndicator.tsx   # Streaming status indicator
 │       │   ├── ThinkingIndicator.tsx    # Agent thinking indicator
 │       │   ├── ErrorBoundary.tsx        # React error boundary
-│       │   └── ui/                      # shadcn/ui primitives (button, input, card, etc.)
+│       │   └── ui/                      # shadcn/ui primitives (button, input, badge, etc.)
 │       ├── hooks/
 │       │   ├── useSessions.ts       # Session CRUD (list, create, select, update, delete)
 │       │   ├── useChat.ts           # Chat state and send message
@@ -180,7 +184,7 @@ terraform apply
 │       │   ├── utils.ts             # cn() — tailwind-merge + clsx
 │       │   └── queryKeys.ts         # TanStack Query cache key factories
 │       └── types/
-│           └── index.ts             # Session, ChatMessage, ToolCall, StreamEvent types
+│           └── index.ts             # Session, ChatMessage, FileAttachment, ToolCall types
 ├── infra/                   # Terraform (AWS)
 │   ├── main.tf              # Root module: ECR, DynamoDB, S3, IAM, App Runner
 │   ├── variables.tf         # Input variables
@@ -204,11 +208,22 @@ The agent supports the following tools:
 
 | Tool | Description |
 |------|-------------|
-| Session Manager | Store, retrieve, list, and generate download URLs for tool results in DynamoDB. Keeps large results out of the context window; the agent retrieves them on demand. |
+| Session Manager | Store, retrieve, list, get download URLs, and get chunks for tool results in DynamoDB. Large results are auto-chunked with per-chunk S3 storage; chunk retrieval fetches only the requested chunk object instead of the full blob. |
 | Database Query | Execute read-only SQL queries against a SQLite database (sample products table included for demo). |
 | Web Download | Fetch a URL, strip HTML tags, and return the text content. |
 | External API | Make HTTP requests (GET/POST) to arbitrary external endpoints and return the response. |
-| File Source | Read CSV or JSON files from local disk or S3 URIs. |
+| File Source | Read CSV, JSON, or PDF files from local disk or S3 URIs. |
+| Data Analysis | Analyze CSV or JSON files server-side using pandas (describe, aggregate, query, filter, search, value_counts). Avoids loading full file contents into the context window. |
+
+## File Uploads
+
+Users can attach CSV or PDF files directly in the chat input (paperclip button). The flow:
+
+1. The frontend uploads the file via `POST /api/chat/upload` (max 50 MB).
+2. The backend stores it in S3 under `uploads/{session_id}/` and returns an `s3://` URI.
+3. The URI is injected into the user message so the agent can process the file with `file_source` (preview) or `data_analysis` (server-side computation).
+
+File uploads require an S3 bucket to be configured (`S3_RESULTS_BUCKET`).
 
 ## Environment Variables
 
@@ -222,9 +237,11 @@ Copy `.env.example` to `.env` and configure:
 | `AWS_REGION` | `us-east-1` | AWS region for DynamoDB and S3 |
 | `DYNAMODB_TABLE_NAME` | `tool_results` | DynamoDB table name |
 | `DYNAMODB_ENDPOINT_URL` | `http://localhost:8000` | DynamoDB endpoint (use local for development) |
-| `S3_RESULTS_BUCKET` | — | S3 bucket for offloading large tool results |
+| `S3_RESULTS_BUCKET` | — | S3 bucket for offloading large tool results and file uploads |
 | `S3_PRESIGNED_URL_EXPIRY` | `3600` | Presigned URL expiry in seconds |
-| `SUMMARIZE_TOKEN_THRESHOLD` | `4000` | Token count above which tool results are auto-summarized |
+| `CHUNK_TOKEN_BUDGET` | `10000` | Token budget per chunk when auto-chunking large tool results |
+| `MAX_CONTEXT_TOKENS` | `25000` | Maximum token budget for conversation context sent to the LLM |
+| `RECENT_TURNS_TO_PRESERVE` | `5` | Number of recent user/assistant turns always kept when trimming |
 | `BACKEND_PORT` | `8080` | Port the backend listens on |
 | `FRONTEND_URL` | `http://localhost:5173` | Allowed CORS origin |
 | `LOG_LEVEL` | `INFO` | Logging level |

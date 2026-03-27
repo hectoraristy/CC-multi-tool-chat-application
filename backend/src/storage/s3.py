@@ -22,6 +22,10 @@ class S3ResultStore:
     def make_key(session_id: str, result_id: str) -> str:
         return f"results/{session_id}/{result_id}.txt"
 
+    @staticmethod
+    def make_chunk_key(session_id: str, result_id: str, chunk_index: int) -> str:
+        return f"results/{session_id}/{result_id}/chunk_{chunk_index}.txt"
+
     def upload_result(self, key: str, content: str) -> None:
         self._client.put_object(
             Bucket=self._bucket,
@@ -36,6 +40,10 @@ class S3ResultStore:
         content: str = resp["Body"].read().decode("utf-8")
         logger.info("Downloaded tool result from s3://%s/%s", self._bucket, key)
         return content
+
+    def delete_result(self, key: str) -> None:
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+        logger.info("Deleted S3 object s3://%s/%s", self._bucket, key)
 
     def generate_presigned_url(self, key: str, expiry: int | None = None) -> str:
         if expiry is None:

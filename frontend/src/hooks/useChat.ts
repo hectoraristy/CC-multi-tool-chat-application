@@ -1,13 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
-import { getMessages } from "@/services/api";
+import { useCallback, useState } from "react";
+import { getMessages, uploadFile } from "@/services/api";
 import { useStreamChat } from "@/hooks/useStreamChat";
 import { queryKeys } from "@/lib/queryKeys";
-import type { ChatMessage, ToolCall } from "@/types";
+import type { ChatMessage, FileAttachment, ToolCall } from "@/types";
 
 export function useChat(sessionId: string | null) {
   const queryClient = useQueryClient();
   const { streaming, streamingContent, startStream, stopStream } = useStreamChat();
+  const [uploading, setUploading] = useState(false);
 
   const { data: messages = [] } = useQuery<ChatMessage[]>({
     queryKey: queryKeys.messages(sessionId!),
@@ -16,13 +17,30 @@ export function useChat(sessionId: string | null) {
   });
 
   const sendMessage = useCallback(
-    (content: string) => {
-      if (!sessionId || streaming) return;
+    async (content: string, file?: File) => {
+      if (!sessionId || streaming || uploading) return;
+
+      let attachments: FileAttachment[] | undefined;
+
+      if (file) {
+        try {
+          setUploading(true);
+          const attachment = await uploadFile(sessionId, file);
+          attachments = [attachment];
+        } catch (err) {
+          console.error("File upload failed:", err);
+          setUploading(false);
+          return;
+        } finally {
+          setUploading(false);
+        }
+      }
 
       const userMsg: ChatMessage = {
         message_id: crypto.randomUUID(),
         role: "user",
         content,
+        attachments,
         created_at: new Date().toISOString(),
       };
 
@@ -62,15 +80,16 @@ export function useChat(sessionId: string | null) {
         onError: (err) => {
           console.error("Stream error:", err);
         },
-      });
+      }, attachments);
     },
-    [sessionId, streaming, queryClient, startStream]
+    [sessionId, streaming, uploading, queryClient, startStream]
   );
 
   return {
     messages,
     streaming,
     streamingContent,
+    uploading,
     sendMessage,
     stopStreaming: stopStream,
   };

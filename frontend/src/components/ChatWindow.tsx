@@ -11,6 +11,7 @@ export function ChatWindow({ sessionId }: Props) {
     messages,
     streaming,
     streamingContent,
+    uploading,
     sendMessage,
     stopStreaming,
   } = useChat(sessionId);
@@ -39,9 +40,10 @@ export function ChatWindow({ sessionId }: Props) {
 
       <MessageInput
         onSend={sendMessage}
-        disabled={streaming}
+        disabled={streaming || uploading}
         onStop={stopStreaming}
         streaming={streaming}
+        uploading={uploading}
       />
     </div>
   );

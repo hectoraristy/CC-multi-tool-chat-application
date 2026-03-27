@@ -5,6 +5,13 @@ export interface Session {
   updated_at: string;
 }
 
+export interface FileAttachment {
+  s3_uri: string;
+  filename: string;
+  file_type: "csv" | "pdf";
+  size_bytes: number;
+}
+
 export interface ChatMessage {
   message_id: string;
   role: "user" | "assistant" | "tool" | "tool_call";
@@ -13,6 +20,7 @@ export interface ChatMessage {
   tool_call_id?: string;
   tool_args?: Record<string, unknown>;
   result_id?: string;
+  attachments?: FileAttachment[];
   created_at: string;
 }
 
@@ -20,15 +28,4 @@ export interface ToolCall {
   tool: string;
   args: Record<string, unknown>;
   id: string;
-}
-
-export interface ToolResult {
-  tool: string;
-  result_preview: string;
-  result_id?: string;
-}
-
-export interface StreamEvent {
-  event: "token" | "tool_call" | "tool_result" | "done" | "error";
-  data: string;
 }

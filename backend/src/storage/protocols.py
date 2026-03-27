@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from storage.models import ChatMessage, PaginatedResult, Session, ToolResult, ToolResultMetadata
+from storage.models import (
+    ChatMessage,
+    PaginatedResult,
+    Session,
+    ToolResult,
+    ToolResultMetadata,
+)
 
 
 class SessionRepository(Protocol):
@@ -48,7 +54,12 @@ class ToolResultRepository(Protocol):
         ...
 
 
-class Store(SessionRepository, MessageRepository, ToolResultRepository, Protocol):
-    """Combined protocol for implementations that satisfy all three repositories."""
+class Store(
+    SessionRepository,
+    MessageRepository,
+    ToolResultRepository,
+    Protocol,
+):
+    """Combined protocol for implementations that satisfy all repositories."""
 
     ...

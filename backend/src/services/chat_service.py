@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_result_id(content: str) -> str | None:
-    """Return the result_id embedded in a ToolMessage, or None."""
     m = RESULT_ID_RE.search(content)
     return m.group(1) if m else None
 
@@ -31,15 +30,24 @@ async def stream_agent_events(
     store: Store,
     session_id: str,
     lc_messages: list[BaseMessage],
+    *,
+    tools_used_this_session: list[str] | None = None,
+    turn_count: int = 0,
 ) -> AsyncIterator[dict[str, str]]:
-    """Run the agent graph and yield SSE-ready dicts."""
-    state = {"messages": lc_messages, "session_id": session_id}
+    state: dict[str, object] = {
+        "messages": lc_messages,
+        "session_id": session_id,
+        "tools_used_this_session": tools_used_this_session or [],
+        "turn_count": turn_count,
+    }
     full_response = ""
     pending_tool_msgs: dict[str, ToolMessage] = {}
 
     try:
         for event in graph.stream(state, stream_mode="updates"):
             for _node_name, node_output in event.items():
+                if not node_output:
+                    continue
                 msgs = node_output.get("messages", [])
                 for msg in msgs:
                     if isinstance(msg, AIMessage):

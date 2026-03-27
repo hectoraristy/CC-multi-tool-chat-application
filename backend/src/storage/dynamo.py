@@ -10,13 +10,19 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 from config import get_settings
-from storage.models import ChatMessage, PaginatedResult, Session, ToolResult, ToolResultMetadata
+from storage.models import (
+    ChatMessage,
+    PaginatedResult,
+    Session,
+    ToolResult,
+    ToolResultMetadata,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class DynamoDBStore:
-    """DynamoDB-backed storage for sessions, messages, and tool results.
+    """DynamoDB-backed storage for sessions, messages, tool results, and user facts.
 
     Uses a single-table design with PK/SK patterns:
       - Session:     PK=SESSION#{session_id}  SK=META
@@ -221,9 +227,13 @@ class DynamoDBStore:
             "metadata": json.dumps(result.metadata),
             "created_at": result.created_at.isoformat(),
             "size_bytes": result.size_bytes,
+            "total_chunks": result.total_chunks,
+            "chunk_size_chars": result.chunk_size_chars,
         }
         if result.s3_key:
             item["s3_key"] = result.s3_key
+        if result.s3_chunk_prefix:
+            item["s3_chunk_prefix"] = result.s3_chunk_prefix
         self._table.put_item(Item=item)
 
     def get_tool_result(self, session_id: str, result_id: str) -> ToolResult | None:
@@ -240,9 +250,12 @@ class DynamoDBStore:
             summary=item["summary"],
             full_result=item.get("full_result", ""),
             s3_key=item.get("s3_key"),
+            s3_chunk_prefix=item.get("s3_chunk_prefix"),
             metadata=json.loads(item.get("metadata", "{}")),
             created_at=datetime.fromisoformat(item["created_at"]),
             size_bytes=int(item["size_bytes"]),
+            total_chunks=int(item.get("total_chunks", 0)),
+            chunk_size_chars=int(item.get("chunk_size_chars", 0)),
         )
 
     def list_tool_results(self, session_id: str) -> list[ToolResultMetadata]:
@@ -273,3 +286,4 @@ class DynamoDBStore:
             )
         results.sort(key=lambda r: r.created_at, reverse=True)
         return results
+

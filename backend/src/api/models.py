@@ -6,18 +6,25 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class FileAttachment(BaseModel):
+    s3_uri: str
+    filename: str
+    file_type: str
+
+
+class FileUploadResponse(BaseModel):
+    s3_uri: str
+    filename: str
+    file_type: str
+    size_bytes: int
+
+
 class ChatRequest(BaseModel):
     session_id: str = Field(
         ..., pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     )
     message: str = Field(..., min_length=1)
-
-
-class ChatEvent(BaseModel):
-    """Individual SSE event sent during streaming."""
-
-    event: str  # "token" | "tool_call" | "tool_result" | "done" | "error"
-    data: str
+    attachments: list[FileAttachment] | None = None
 
 
 class SessionCreate(BaseModel):

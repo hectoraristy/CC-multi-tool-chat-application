@@ -1,4 +1,5 @@
 import React from "react";
+import { FileSpreadsheet, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/types";
 
@@ -27,6 +28,25 @@ export const MessageBubble = React.memo(function MessageBubble({ message }: Prop
         >
           {isUser ? "You" : "Assistant"}
         </span>
+
+        {isUser && message.attachments?.length ? (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {message.attachments.map((att) => (
+              <span
+                key={att.s3_uri}
+                className="inline-flex items-center gap-1 rounded-md bg-primary-foreground/15 px-2 py-0.5 text-xs"
+              >
+                {att.file_type === "csv" ? (
+                  <FileSpreadsheet className="size-3" />
+                ) : (
+                  <FileText className="size-3" />
+                )}
+                {att.filename}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
       </div>
     </div>

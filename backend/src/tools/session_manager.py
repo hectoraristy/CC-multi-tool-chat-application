@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
 from api.dependencies import get_s3_store, get_store
 from config import get_settings
@@ -23,7 +23,10 @@ def _handle_store(
     tool_name: str,
     content: str,
     summary: str,
+    **_: Any,
 ) -> str:
+    from services.chunking import _compute_line_chunks, _estimate_chunk_size_chars
+
     for text in (content, summary):
         match = RESULT_ID_RE.search(text)
         if match:
@@ -42,16 +45,31 @@ def _handle_store(
 
     rid = result_id or str(uuid.uuid4())
     truncated_summary = summary or content[:500]
+    byte_size = len(content.encode("utf-8"))
 
     s3_key: str | None = None
+    s3_chunk_prefix: str | None = None
     stored_content = content
 
     s3 = get_s3_store()
-    if s3 is not None and len(content.encode("utf-8")) > S3_OFFLOAD_THRESHOLD:
+    if s3 is not None and byte_size > S3_OFFLOAD_THRESHOLD:
         s3_key = S3ResultStore.make_key(session_id, rid)
         s3.upload_result(s3_key, content)
         stored_content = ""
         logger.info("Offloaded large result %s to S3 key %s", rid, s3_key)
+
+    settings = get_settings()
+    model = settings.openai_model if settings.llm_provider == "openai" else ""
+    chunk_size_chars = _estimate_chunk_size_chars(content, settings.chunk_token_budget, model)
+    boundaries = _compute_line_chunks(content, chunk_size_chars)
+    total_chunks = len(boundaries) if len(boundaries) > 1 else 0
+
+    if total_chunks > 0 and s3 is not None and s3_key:
+        s3_chunk_prefix = f"results/{session_id}/{rid}/chunk_"
+        for i, (start, end) in enumerate(boundaries):
+            chunk_key = S3ResultStore.make_chunk_key(session_id, rid, i)
+            s3.upload_result(chunk_key, content[start:end])
+        logger.info("Uploaded %d chunk objects for result %s", total_chunks, rid)
 
     result = ToolResult(
         session_id=session_id,
@@ -60,7 +78,10 @@ def _handle_store(
         summary=truncated_summary,
         full_result=stored_content,
         s3_key=s3_key,
-        size_bytes=len(content.encode("utf-8")),
+        s3_chunk_prefix=s3_chunk_prefix,
+        size_bytes=byte_size,
+        total_chunks=total_chunks,
+        chunk_size_chars=chunk_size_chars if total_chunks > 0 else 0,
         metadata={"source_tool": tool_name},
     )
     store.store_tool_result(result)
@@ -74,7 +95,7 @@ def _handle_retrieve(
     store: Store,
     session_id: str,
     result_id: str,
-    **_: str,
+    **_: Any,
 ) -> str:
     if not result_id:
         return "Error: result_id is required for retrieve action."
@@ -96,7 +117,7 @@ def _handle_retrieve(
 def _handle_list(
     store: Store,
     session_id: str,
-    **_: str,
+    **_: Any,
 ) -> str:
     items = store.list_tool_results(session_id)
     if not items:
@@ -112,7 +133,7 @@ def _handle_download_url(
     store: Store,
     session_id: str,
     result_id: str,
-    **_: str,
+    **_: Any,
 ) -> str:
     if not result_id:
         return "Error: result_id is required for get_download_url action."
@@ -141,22 +162,81 @@ def _handle_download_url(
     )
 
 
+def _handle_get_chunk(
+    store: Store,
+    session_id: str,
+    result_id: str,
+    chunk_index: int = 0,
+    **_: Any,
+) -> str:
+    """Retrieve a specific chunk of a previously stored (and chunked) result."""
+    if not result_id:
+        return "Error: result_id is required for get_chunk action."
+
+    result = store.get_tool_result(session_id, result_id)
+    if result is None:
+        return f"No result found with id '{result_id}' in session '{session_id}'."
+
+    if result.total_chunks == 0:
+        return (
+            f"Result '{result_id}' was not chunked. "
+            "Use action='retrieve' to get the full content."
+        )
+
+    if chunk_index < 0 or chunk_index >= result.total_chunks:
+        return (
+            f"Invalid chunk_index {chunk_index}. "
+            f"Valid range: 0 to {result.total_chunks - 1}."
+        )
+
+    if result.s3_chunk_prefix:
+        s3 = get_s3_store()
+        if s3 is not None:
+            chunk_key = f"{result.s3_chunk_prefix}{chunk_index}.txt"
+            chunk = s3.download_result(chunk_key)
+        else:
+            return "Cannot retrieve content — S3 storage is not available."
+    elif result.full_result:
+        from services.chunking import get_content_chunk
+
+        chunk = get_content_chunk(result.full_result, chunk_index, result.chunk_size_chars)
+    elif result.s3_key:
+        # Backward compatibility: old results without per-chunk S3 objects
+        s3 = get_s3_store()
+        if s3 is not None:
+            from services.chunking import get_content_chunk
+
+            full_content = s3.download_result(result.s3_key)
+            chunk = get_content_chunk(full_content, chunk_index, result.chunk_size_chars)
+        else:
+            return "Cannot retrieve content — S3 storage is not available."
+    else:
+        return f"No content available for result '{result_id}'."
+
+    return (
+        f"[Chunk {chunk_index + 1}/{result.total_chunks} of result {result_id}]\n\n"
+        f"{chunk}"
+    )
+
+
 _ACTION_HANDLERS: dict[str, Callable[..., str]] = {
     "store": _handle_store,
     "retrieve": _handle_retrieve,
     "list": _handle_list,
     "get_download_url": _handle_download_url,
+    "get_chunk": _handle_get_chunk,
 }
 
 
 @tool
 def session_manager(
-    action: Literal["store", "retrieve", "list", "get_download_url"],
+    action: Literal["store", "retrieve", "list", "get_download_url", "get_chunk"],
     session_id: str,
     result_id: str = "",
     tool_name: str = "",
     content: str = "",
     summary: str = "",
+    chunk_index: int = 0,
 ) -> str:
     """Manage stored tool results for the current chat session.
 
@@ -167,6 +247,9 @@ def session_manager(
       - list: List metadata (id, tool_name, summary, size) of all stored results.
       - get_download_url: Generate a temporary download URL for a stored result by result_id.
         Returns a pre-signed URL the user can open in their browser.
+      - get_chunk: Retrieve a specific chunk of a large, auto-chunked result.
+        Provide result_id and chunk_index (0-based). Returns the chunk content
+        with a header indicating the chunk number and total.
     """
     handler = _ACTION_HANDLERS.get(action)
     if handler is None:
@@ -179,4 +262,5 @@ def session_manager(
         tool_name=tool_name,
         content=content,
         summary=summary,
+        chunk_index=chunk_index,
     )

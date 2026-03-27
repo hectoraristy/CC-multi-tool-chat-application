@@ -1,5 +1,5 @@
 import { readSSEStream } from "@/lib/sse";
-import type { ChatMessage, Session } from "@/types";
+import type { ChatMessage, FileAttachment, Session } from "@/types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -67,24 +67,52 @@ export async function getToolResultDownloadUrl(
   return URL.createObjectURL(new Blob([text], { type: "text/plain" }));
 }
 
+export async function uploadFile(
+  sessionId: string,
+  file: File
+): Promise<FileAttachment> {
+  const form = new FormData();
+  form.append("session_id", sessionId);
+  form.append("file", file);
+
+  const res = await fetch(`${BASE_URL}/chat/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => res.statusText);
+    throw new Error(`Upload failed: ${detail}`);
+  }
+  return res.json();
+}
+
 export function streamChatSSE(
   sessionId: string,
   message: string,
   onEvent: (eventType: string, data: string) => void,
   onDone: () => void,
-  onError: (err: string) => void
+  onError: (err: string) => void,
+  attachments?: FileAttachment[]
 ): AbortController {
   const controller = new AbortController();
 
   (async () => {
     try {
+      const payload: Record<string, unknown> = {
+        session_id: sessionId,
+        message,
+      };
+      if (attachments?.length) {
+        payload.attachments = attachments;
+      }
+
       const res = await fetch(`${BASE_URL}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({ session_id: sessionId, message }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
 

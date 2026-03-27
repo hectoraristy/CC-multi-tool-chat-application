@@ -132,8 +132,6 @@ def get_tool_results(
 
 @dataclass(frozen=True)
 class DownloadContent:
-    """Result of resolving a tool result for download."""
-
     url: str | None = None
     content: str | None = None
 
@@ -143,7 +141,6 @@ def get_download_result(
     session_id: str,
     result_id: str,
 ) -> DownloadContent:
-    """Resolve a stored tool result into a download URL or inline content."""
     result: ToolResult | None = store.get_tool_result(session_id, result_id)
     if result is None:
         raise NotFoundError("ToolResult", result_id)

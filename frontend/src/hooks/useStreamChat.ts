@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { streamChatSSE } from "@/services/api";
+import type { FileAttachment } from "@/types";
 
 interface StreamCallbacks {
   onEvent: (eventType: string, data: string) => void;
@@ -13,7 +14,7 @@ export function useStreamChat() {
   const abortRef = useRef<AbortController | null>(null);
 
   const startStream = useCallback(
-    (sessionId: string, message: string, callbacks: StreamCallbacks) => {
+    (sessionId: string, message: string, callbacks: StreamCallbacks, attachments?: FileAttachment[]) => {
       setStreaming(true);
       setStreamingContent("");
 
@@ -39,7 +40,8 @@ export function useStreamChat() {
           setStreaming(false);
           setStreamingContent("");
           callbacks.onError(err);
-        }
+        },
+        attachments
       );
     },
     []
