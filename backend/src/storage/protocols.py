@@ -8,7 +8,6 @@ from storage.models import (
     Session,
     ToolResult,
     ToolResultMetadata,
-    UserFact,
 )
 
 
@@ -55,19 +54,10 @@ class ToolResultRepository(Protocol):
         ...
 
 
-class UserFactRepository(Protocol):
-    def store_user_fact(self, fact: UserFact) -> None:
-        ...
-
-    def get_user_facts(self, user_id: str) -> list[UserFact]:
-        ...
-
-
 class Store(
     SessionRepository,
     MessageRepository,
     ToolResultRepository,
-    UserFactRepository,
     Protocol,
 ):
     """Combined protocol for implementations that satisfy all repositories."""

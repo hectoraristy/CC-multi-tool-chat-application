@@ -123,22 +123,21 @@ terraform apply
 │       │       ├── chat.py      # POST /api/chat (SSE streaming) + POST /api/chat/upload (file upload)
 │       │       └── sessions.py  # Session CRUD, messages, tool results
 │       ├── agent/
-│       │   ├── state.py         # AgentState TypedDict (messages, session_id, facts, turn count, etc.)
+│       │   ├── state.py         # AgentState TypedDict (messages, session_id, turn count, etc.)
 │       │   ├── graph.py         # LangGraph graph: router → plan → agent → tools (chunking) → evaluate
 │       │   ├── nodes.py         # plan_node, evaluate_node
-│       │   ├── prompt_builder.py # Dynamic system prompt (facts, tool instructions, chunking instructions)
+│       │   ├── prompt_builder.py # Dynamic system prompt (tool instructions, chunking instructions)
 │       │   └── llm_factory.py   # create_llm() — OpenAI, Anthropic, or Bedrock
 │       ├── services/
 │       │   ├── chat_service.py      # stream_agent_events() — runs graph, yields SSE
 │       │   ├── chunking.py          # ChunkingMiddleware — auto-chunk large tool results
 │       │   ├── context_manager.py   # Token-aware context compaction and message summarization
-│       │   ├── memory.py            # Cross-session user fact extraction and dedup
 │       │   ├── session_service.py   # Session CRUD operations
 │       │   ├── message_converter.py # Stored messages → LangChain message format
 │       │   └── persistence.py       # Persist user/assistant/tool messages
 │       ├── storage/
-│       │   ├── protocols.py     # Repository protocols (Session, Message, ToolResult, UserFact)
-│       │   ├── models.py        # Domain models (Session, ChatMessage, ToolResult, UserFact)
+│       │   ├── protocols.py     # Repository protocols (Session, Message, ToolResult)
+│       │   ├── models.py        # Domain models (Session, ChatMessage, ToolResult)
 │       │   ├── dynamo.py        # DynamoDB single-table implementation
 │       │   └── s3.py            # S3 offload for large tool results
 │       └── tools/
@@ -243,7 +242,6 @@ Copy `.env.example` to `.env` and configure:
 | `CHUNK_TOKEN_BUDGET` | `10000` | Token budget per chunk when auto-chunking large tool results |
 | `MAX_CONTEXT_TOKENS` | `25000` | Maximum token budget for conversation context sent to the LLM |
 | `RECENT_TURNS_TO_PRESERVE` | `5` | Number of recent user/assistant turns always kept when trimming |
-| `USER_ID` | `default` | User identifier for cross-session fact storage |
 | `BACKEND_PORT` | `8080` | Port the backend listens on |
 | `FRONTEND_URL` | `http://localhost:5173` | Allowed CORS origin |
 | `LOG_LEVEL` | `INFO` | Logging level |

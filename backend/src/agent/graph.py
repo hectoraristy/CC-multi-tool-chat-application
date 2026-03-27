@@ -25,7 +25,6 @@ def _agent_node(state: AgentState) -> dict[str, list[BaseMessage]]:
         prompt = build_system_prompt(
             session_id=session_id,
             tools_used=state.get("tools_used_this_session", []),
-            user_facts=state.get("user_facts", []),
         )
         messages = [SystemMessage(content=prompt)] + messages
 

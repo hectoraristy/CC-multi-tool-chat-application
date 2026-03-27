@@ -29,8 +29,6 @@ class Settings(BaseSettings):
     max_context_tokens: int = 25_000
     recent_turns_to_preserve: int = 5
 
-    user_id: str = "default"
-
     s3_results_bucket: str = ""
     s3_presigned_url_expiry: int = 3600
 

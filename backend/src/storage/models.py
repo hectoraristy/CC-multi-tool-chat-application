@@ -61,15 +61,6 @@ class ChatMessage(BaseModel):
     created_at: datetime = Field(default_factory=_utc_now)
 
 
-class UserFact(BaseModel):
-    user_id: str
-    fact_id: str
-    content: str
-    category: str = "general"
-    source_session: str = ""
-    created_at: datetime = Field(default_factory=_utc_now)
-
-
 @dataclass
 class PaginatedResult(Generic[T]):
     items: list[T] = field(default_factory=list)

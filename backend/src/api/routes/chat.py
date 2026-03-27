@@ -95,15 +95,10 @@ async def chat(
         original = lc_messages[-1].content
         lc_messages[-1] = HumanMessage(content=f"{original}\n\n{attachment_ctx}")
 
-    settings = get_settings()
-
     tools_used = list({
         m.tool_name for m in stored_messages
         if m.role in ("tool_call", "tool") and m.tool_name
     })
-
-    user_facts_objs = store.get_user_facts(settings.user_id)
-    user_facts = [f.content for f in user_facts_objs]
 
     return EventSourceResponse(
         stream_agent_events(
@@ -113,6 +108,5 @@ async def chat(
             lc_messages,
             tools_used_this_session=tools_used,
             turn_count=len(stored_messages),
-            user_facts=user_facts,
         )
     )

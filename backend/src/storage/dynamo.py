@@ -16,7 +16,6 @@ from storage.models import (
     Session,
     ToolResult,
     ToolResultMetadata,
-    UserFact,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,7 +28,6 @@ class DynamoDBStore:
       - Session:     PK=SESSION#{session_id}  SK=META
       - Message:     PK=SESSION#{session_id}  SK=MSG#{timestamp}#{message_id}
       - ToolResult:  PK=SESSION#{session_id}  SK=RESULT#{result_id}
-      - UserFact:    PK=USER#{user_id}        SK=FACT#{fact_id}
     """
 
     def __init__(self) -> None:
@@ -286,41 +284,3 @@ class DynamoDBStore:
         results.sort(key=lambda r: r.created_at, reverse=True)
         return results
 
-    # ── User Facts ─────────────────────────────────────────────────────
-
-    def store_user_fact(self, fact: UserFact) -> None:
-        self._table.put_item(
-            Item={
-                "PK": f"USER#{fact.user_id}",
-                "SK": f"FACT#{fact.fact_id}",
-                "user_id": fact.user_id,
-                "fact_id": fact.fact_id,
-                "content": fact.content,
-                "category": fact.category,
-                "source_session": fact.source_session,
-                "created_at": fact.created_at.isoformat(),
-            }
-        )
-
-    def get_user_facts(self, user_id: str) -> list[UserFact]:
-        resp = self._table.query(
-            KeyConditionExpression="PK = :pk AND begins_with(SK, :prefix)",
-            ExpressionAttributeValues={
-                ":pk": f"USER#{user_id}",
-                ":prefix": "FACT#",
-            },
-        )
-        facts = []
-        for item in resp.get("Items", []):
-            facts.append(
-                UserFact(
-                    user_id=item["user_id"],
-                    fact_id=item["fact_id"],
-                    content=item["content"],
-                    category=item.get("category", "general"),
-                    source_session=item.get("source_session", ""),
-                    created_at=datetime.fromisoformat(item["created_at"]),
-                )
-            )
-        facts.sort(key=lambda f: f.created_at)
-        return facts

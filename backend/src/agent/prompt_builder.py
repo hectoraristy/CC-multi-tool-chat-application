@@ -86,15 +86,10 @@ def _format_tool_instructions(tools_used: list[str]) -> str:
 def build_system_prompt(
     session_id: str,
     tools_used: list[str] | None = None,
-    user_facts: list[str] | None = None,
 ) -> str:
     sections: list[str] = [_BASE_IDENTITY]
 
     sections.append(f"The current session ID is: {session_id}")
-
-    if user_facts:
-        facts_block = "\n".join(f"- {f}" for f in user_facts)
-        sections.append(f"Known user context:\n{facts_block}")
 
     sections.append(_format_tool_instructions(tools_used or []))
     sections.append(_CHUNKING_INSTRUCTIONS)
