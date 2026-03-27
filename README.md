@@ -124,13 +124,13 @@ terraform apply
 │       │       └── sessions.py  # Session CRUD, messages, tool results
 │       ├── agent/
 │       │   ├── state.py         # AgentState TypedDict (messages, session_id, turn count, etc.)
-│       │   ├── graph.py         # LangGraph graph: router → plan → agent → tools (chunking) → evaluate
-│       │   ├── nodes.py         # plan_node, evaluate_node
+│       │   ├── graph.py         # LangGraph graph: router → plan → agent ⇄ tools (chunking)
+│       │   ├── nodes.py         # plan_node
 │       │   ├── prompt_builder.py # Dynamic system prompt (tool instructions, chunking instructions)
 │       │   └── llm_factory.py   # create_llm() — OpenAI, Anthropic, or Bedrock
 │       ├── services/
 │       │   ├── chat_service.py      # stream_agent_events() — runs graph, yields SSE
-│       │   ├── chunking.py          # ChunkingMiddleware — auto-chunk large tool results
+│       │   ├── chunking.py          # ChunkingMiddleware — auto-chunk large tool results with per-chunk S3 storage
 │       │   ├── context_manager.py   # Token-aware context compaction and message summarization
 │       │   ├── session_service.py   # Session CRUD operations
 │       │   ├── message_converter.py # Stored messages → LangChain message format
@@ -139,7 +139,7 @@ terraform apply
 │       │   ├── protocols.py     # Repository protocols (Session, Message, ToolResult)
 │       │   ├── models.py        # Domain models (Session, ChatMessage, ToolResult)
 │       │   ├── dynamo.py        # DynamoDB single-table implementation
-│       │   └── s3.py            # S3 offload for large tool results
+│       │   └── s3.py            # S3 offload for large tool results + per-chunk object storage
 │       └── tools/
 │           ├── __init__.py          # Exports ALL_TOOLS
 │           ├── session_manager.py   # Store/retrieve/list/download/get_chunk tool results
@@ -208,7 +208,7 @@ The agent supports the following tools:
 
 | Tool | Description |
 |------|-------------|
-| Session Manager | Store, retrieve, list, get download URLs, and get chunks for tool results in DynamoDB. Large results are auto-chunked; the agent retrieves subsequent chunks on demand. |
+| Session Manager | Store, retrieve, list, get download URLs, and get chunks for tool results in DynamoDB. Large results are auto-chunked with per-chunk S3 storage; chunk retrieval fetches only the requested chunk object instead of the full blob. |
 | Database Query | Execute read-only SQL queries against a SQLite database (sample products table included for demo). |
 | Web Download | Fetch a URL, strip HTML tags, and return the text content. |
 | External API | Make HTTP requests (GET/POST) to arbitrary external endpoints and return the response. |

@@ -12,4 +12,3 @@ class AgentState(TypedDict):
     session_id: str
     tools_used_this_session: NotRequired[list[str]]
     turn_count: NotRequired[int]
-    _eval_route: NotRequired[str]

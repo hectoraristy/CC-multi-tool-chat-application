@@ -15,8 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 def _compute_line_chunks(content: str, chunk_size_chars: int) -> list[tuple[int, int]]:
-    """Return ``(start, end)`` character offsets for each chunk, snapped to
-    newline boundaries so that no line is ever split across chunks."""
+    """Return ``(start, end)`` character offsets for each chunk.
+
+    Boundaries are snapped to newlines when possible, then to spaces as a
+    fallback.  If a segment contains neither (e.g. base64 or minified JSON),
+    it is split at exactly *chunk_size_chars* characters.
+    """
     if not content:
         return [(0, 0)]
 
@@ -30,32 +34,34 @@ def _compute_line_chunks(content: str, chunk_size_chars: int) -> list[tuple[int,
             newline_pos = content.rfind("\n", start, end)
             if newline_pos > start:
                 end = newline_pos + 1
+            else:
+                space_pos = content.rfind(" ", start, end)
+                if space_pos > start:
+                    end = space_pos + 1
         chunks.append((start, end))
         start = end
 
     return chunks or [(0, length)]
 
 
-def calculate_chunk_info(
+def _estimate_chunk_size_chars(
     content: str,
     token_budget: int,
     model: str = "",
-) -> tuple[int, int]:
-    """Estimate how to split *content* into chunks of at most *token_budget* tokens.
+) -> int:
+    """Return the target character length per chunk for *token_budget* tokens.
 
-    Returns ``(total_chunks, chunk_size_chars)`` where *chunk_size_chars* is the
-    target character length per chunk.  Actual boundaries are snapped to newlines
-    by :func:`_compute_line_chunks`, so *total_chunks* reflects the real count.
+    A 10 % safety margin is applied to account for non-uniform token density
+    across different regions of *content*.
     """
     dummy = [ToolMessage(content=content, tool_call_id="calc")]
     total_tokens = count_message_tokens(dummy, model)
     if total_tokens <= 0:
-        return 1, len(content)
+        return len(content)
 
     chars_per_token = len(content) / total_tokens
-    chunk_size_chars = max(1, int(chars_per_token * token_budget))
-    total_chunks = len(_compute_line_chunks(content, chunk_size_chars))
-    return total_chunks, chunk_size_chars
+    effective_budget = int(token_budget * 0.9)
+    return max(1, int(chars_per_token * effective_budget))
 
 
 def get_content_chunk(content: str, chunk_index: int, chunk_size_chars: int) -> str:
@@ -137,38 +143,67 @@ class ChunkingMiddleware:
         session_id = state.get("session_id", "unknown")
         result_id = str(uuid.uuid4())
         full_content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        byte_size = len(full_content.encode("utf-8"))
 
-        total_chunks, chunk_size_chars = calculate_chunk_info(
+        chunk_size_chars = _estimate_chunk_size_chars(
             full_content, self.chunk_token_budget, model
         )
+        boundaries = _compute_line_chunks(full_content, chunk_size_chars)
+        total_chunks = len(boundaries)
 
         s3_key: str | None = None
+        s3_chunk_prefix: str | None = None
         stored_content = full_content
+        uploaded_s3_keys: list[str] = []
 
-        s3 = get_s3_store()
-        if s3 is not None and len(full_content.encode("utf-8")) > S3_OFFLOAD_THRESHOLD:
-            s3_key = S3ResultStore.make_key(session_id, result_id)
-            s3.upload_result(s3_key, full_content)
-            stored_content = ""
-            logger.info("Offloaded chunked result %s to S3 key %s", result_id, s3_key)
+        try:
+            s3 = get_s3_store()
+            if s3 is not None and byte_size > S3_OFFLOAD_THRESHOLD:
+                s3_key = S3ResultStore.make_key(session_id, result_id)
+                s3.upload_result(s3_key, full_content)
+                uploaded_s3_keys.append(s3_key)
 
-        store = get_store()
-        store.store_tool_result(
-            ToolResult(
-                session_id=session_id,
-                result_id=result_id,
-                tool_name=msg.name or "unknown",
-                summary=full_content[:500],
-                full_result=stored_content,
-                s3_key=s3_key,
-                size_bytes=len(full_content.encode("utf-8")),
-                total_chunks=total_chunks,
-                chunk_size_chars=chunk_size_chars,
-                metadata={"auto_chunked": True, "source": "ChunkingMiddleware"},
+                s3_chunk_prefix = f"results/{session_id}/{result_id}/chunk_"
+                for i, (start, end) in enumerate(boundaries):
+                    chunk_key = S3ResultStore.make_chunk_key(
+                        session_id, result_id, i
+                    )
+                    s3.upload_result(chunk_key, full_content[start:end])
+                    uploaded_s3_keys.append(chunk_key)
+
+                stored_content = ""
+                logger.info(
+                    "Offloaded chunked result %s to S3 (%d chunk objects)",
+                    result_id,
+                    total_chunks,
+                )
+
+            store = get_store()
+            store.store_tool_result(
+                ToolResult(
+                    session_id=session_id,
+                    result_id=result_id,
+                    tool_name=msg.name or "unknown",
+                    summary=full_content[:500],
+                    full_result=stored_content,
+                    s3_key=s3_key,
+                    s3_chunk_prefix=s3_chunk_prefix,
+                    size_bytes=byte_size,
+                    total_chunks=total_chunks,
+                    chunk_size_chars=chunk_size_chars,
+                    metadata={"auto_chunked": True, "source": "ChunkingMiddleware"},
+                )
             )
-        )
+        except Exception:
+            logger.exception(
+                "Failed to persist chunked result %s — returning original message",
+                result_id,
+            )
+            self._cleanup_s3(uploaded_s3_keys)
+            return msg
 
-        chunk_1 = get_content_chunk(full_content, 0, chunk_size_chars)
+        start, end = boundaries[0]
+        chunk_1 = full_content[start:end]
 
         annotation = (
             f"[Chunked: result_id={result_id}, chunk 1/{total_chunks}, "
@@ -182,7 +217,7 @@ class ChunkingMiddleware:
             result_id,
             total_chunks,
             chunk_size_chars,
-            len(full_content.encode("utf-8")),
+            byte_size,
         )
 
         return ToolMessage(
@@ -191,3 +226,21 @@ class ChunkingMiddleware:
             name=msg.name,
             id=msg.id,
         )
+
+    @staticmethod
+    def _cleanup_s3(keys: list[str]) -> None:
+        """Best-effort removal of S3 objects uploaded before a failure."""
+        if not keys:
+            return
+        try:
+            from api.dependencies import get_s3_store
+
+            s3 = get_s3_store()
+            if s3 is not None:
+                for key in keys:
+                    try:
+                        s3.delete_result(key)
+                    except Exception:
+                        logger.debug("Failed to clean up S3 key %s", key, exc_info=True)
+        except Exception:
+            logger.debug("S3 cleanup skipped — store unavailable", exc_info=True)

@@ -232,6 +232,8 @@ class DynamoDBStore:
         }
         if result.s3_key:
             item["s3_key"] = result.s3_key
+        if result.s3_chunk_prefix:
+            item["s3_chunk_prefix"] = result.s3_chunk_prefix
         self._table.put_item(Item=item)
 
     def get_tool_result(self, session_id: str, result_id: str) -> ToolResult | None:
@@ -248,6 +250,7 @@ class DynamoDBStore:
             summary=item["summary"],
             full_result=item.get("full_result", ""),
             s3_key=item.get("s3_key"),
+            s3_chunk_prefix=item.get("s3_chunk_prefix"),
             metadata=json.loads(item.get("metadata", "{}")),
             created_at=datetime.fromisoformat(item["created_at"]),
             size_bytes=int(item["size_bytes"]),

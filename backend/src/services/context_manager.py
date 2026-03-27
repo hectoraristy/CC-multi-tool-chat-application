@@ -4,6 +4,7 @@ import logging
 import re
 
 import tiktoken
+from constants import RESULT_ID_RE
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 logger = logging.getLogger(__name__)
@@ -11,10 +12,6 @@ logger = logging.getLogger(__name__)
 _CHUNK_ANNOTATION_RE = re.compile(
     r"(\[Chunked: result_id=[0-9a-f-]+, chunk \d+/\d+.*?retrieve more chunks\.\])\n*",
     re.DOTALL,
-)
-
-_RESULT_ID_RE = re.compile(
-    r"\[(?:Summarized — full result stored as|Result ID:|Chunked: result_id=)\s*([0-9a-f-]{36})"
 )
 
 
@@ -108,7 +105,7 @@ def compact_chunked_messages(
 
 def _extract_result_ids(text: str) -> list[str]:
     """Pull all result_id UUIDs from a message's content."""
-    return _RESULT_ID_RE.findall(text)
+    return RESULT_ID_RE.findall(text)
 
 
 _SUMMARY_CHAR_LIMIT = 200

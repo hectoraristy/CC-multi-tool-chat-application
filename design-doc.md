@@ -34,10 +34,9 @@ This document describes the architecture, key technical decisions, trade-offs, a
                              │  │  │ Chunking     │◄─────────┘ (large)   │    │
                              │  │  │ Middleware    │                      │    │
                              │  │  └──────┬───────┘                      │    │
-                             │  │         ▼                              │    │
-                             │  │  ┌──────────────┐                      │    │
-                             │  │  │ Evaluate Node│─► agent              │    │
-                             │  │  └──────────────┘                      │    │
+                             │  │         │                              │    │
+                             │  │         └──────────► agent (loop)      │    │
+                             │  │                                         │    │
                              │  └─────────────────────────────────────────┘    │
                              │                                                 │
                              └──────────┬──────────────┬───────────────────────┘
@@ -59,7 +58,7 @@ This document describes the architecture, key technical decisions, trade-offs, a
 |-----------|-----------|---------------|
 | Frontend | React 19, Vite 6, TypeScript, Tailwind CSS 4, TanStack Query, Radix UI / shadcn, Lucide | Chat UI, session management, file upload, SSE streaming display |
 | Backend API | FastAPI, Python 3.11 | HTTP endpoints, request validation, file upload to S3, SSE streaming |
-| Agent | LangGraph | Orchestration of LLM calls, tool routing, planning, evaluation, auto-chunking of large results |
+| Agent | LangGraph | Orchestration of LLM calls, tool routing, planning, auto-chunking of large results |
 | Chunking Middleware | Python | Wraps the tool node; auto-stores and chunks results exceeding `CHUNK_TOKEN_BUDGET` |
 | Context Manager | Python, tiktoken | Token-aware context compaction (strips old chunk data, summarizes old messages) |
 | Prompt Builder | Python | Dynamic system prompt assembly with tool instructions and chunking instructions |
@@ -77,7 +76,7 @@ This document describes the architecture, key technical decisions, trade-offs, a
 5. **Router** → On the first turn (`turn_count <= 1`, no assistant message yet), routes to the **Plan Node**, which generates an internal bullet-point plan as a `SystemMessage`; subsequent turns skip directly to the **Agent Node**.
 6. **Agent Node** → If no system prompt exists in the messages, `build_system_prompt()` assembles one from the session ID, tool instructions, and chunking instructions. `compact_chunked_messages()` then ensures the message list fits within `MAX_CONTEXT_TOKENS` by stripping old chunk data and summarizing old messages. The LLM is invoked with bound tools.
 7. **If the LLM requests a tool call**, the `tools` node (wrapped in `ChunkingMiddleware`) executes it. If the result exceeds `CHUNK_TOKEN_BUDGET` tokens, the middleware auto-stores the full result in DynamoDB (+ S3 for results >100KB) and replaces the `ToolMessage` with chunk 1 plus an annotation header. The agent can retrieve subsequent chunks via `session_manager(action='get_chunk')`.
-8. **Evaluate Node** → After every tool execution, the evaluate node routes back to the **Agent** unconditionally, letting the agent LLM itself decide whether to make more tool calls or produce a final response. This avoids a separate evaluation LLM call per loop iteration.
+8. **Tool-to-agent loop** → After every tool execution, the graph routes directly back to the **Agent Node** via a static edge. The agent LLM itself decides whether to make additional tool calls or produce a final response — no separate evaluation step or LLM call is needed.
 9. **Streaming**: Each step emits SSE events (`token`, `tool_call`, `tool_result`, `error`, `done`). Internal `session_manager` tool calls are hidden from the user-facing message list.
 10. **The final response is persisted** to DynamoDB and the session timestamp is updated.
 
@@ -96,7 +95,7 @@ This document describes the architecture, key technical decisions, trade-offs, a
 
 This gives the agent the ability to "remember" what data is available without polluting the context window. The agent decides when to pull in specific results based on the user's current question.
 
-Results exceeding `S3_OFFLOAD_THRESHOLD` (100KB) are automatically offloaded to S3 under the key `results/{session_id}/{result_id}.txt`, with the DynamoDB item storing only metadata and an `s3_key` pointer.
+Results exceeding `S3_OFFLOAD_THRESHOLD` (100KB) are automatically offloaded to S3. The full blob is stored under `results/{session_id}/{result_id}.txt` (used by `retrieve` and `get_download_url`). For auto-chunked results, each chunk is also stored as a separate object under `results/{session_id}/{result_id}/chunk_{N}.txt`, enabling O(chunk_size) retrieval instead of downloading the entire blob. The DynamoDB item stores an `s3_key` pointer to the full blob and an `s3_chunk_prefix` for direct per-chunk access.
 
 **DynamoDB Schema** (single-table design):
 
@@ -104,7 +103,7 @@ Results exceeding `S3_OFFLOAD_THRESHOLD` (100KB) are automatically offloaded to 
 |----|-----|-----|
 | `SESSION#{id}` | `META` | Session metadata (title, timestamps) |
 | `SESSION#{id}` | `MSG#{iso_ts}#{msg_id}` | Chat messages (sorted by time) |
-| `SESSION#{id}` | `RESULT#{result_id}` | Tool results (metadata + full content or `s3_key` pointer) |
+| `SESSION#{id}` | `RESULT#{result_id}` | Tool results (metadata + full content or `s3_key` pointer + optional `s3_chunk_prefix` for per-chunk access) |
 
 ### 3.2 Context Window Management
 
@@ -128,16 +127,16 @@ The system prompt is assembled dynamically by `build_system_prompt()` in `agent/
 3. **Tool instructions**: Full descriptions for tools already used in the session; concise one-liners for the rest. Includes `data_analysis` as the preferred tool for analytical follow-up queries on large files.
 4. **Chunking instructions**: Explains the auto-chunking annotation format (`[Chunked: result_id=..., chunk 1/N, ...]`), how to retrieve subsequent chunks via `session_manager(action='get_chunk')`, and when to use `data_analysis` for server-side computation instead of re-reading full files.
 
-### 3.4 Planning and Evaluation Nodes
+### 3.4 Planning Node and Tool Loop
 
 **Plan Node** (`plan_node`):
 - Activated on the first turn of a conversation (`turn_count <= 1` and no prior assistant message).
 - The router directs to `plan` before `agent`. The plan node generates a short internal bullet-point plan as a `SystemMessage` (e.g., "Internal plan: 1. Query the database... 2. Summarize results...").
 - On subsequent turns, the router skips directly to `agent`.
 
-**Evaluate Node** (`evaluate_node`):
-- Runs after every tool execution.
-- Always routes back to `agent` unconditionally — the agent LLM itself decides whether it has enough information to respond or needs additional tool calls. This avoids a separate evaluation LLM call per loop iteration, which halves API usage and avoids Tier 1 rate limit issues.
+**Direct tools-to-agent edge** (no evaluation node):
+- After every tool execution, a static graph edge routes directly back to the `agent` node. The agent LLM itself decides whether it has enough information to respond or needs additional tool calls.
+- This avoids a separate evaluation LLM call per loop iteration, which halves API usage and avoids Tier 1 rate limit issues. The conditional routing at `agent` (`_route_after_agent`) checks whether the last message contains `tool_calls`; if so it goes to `tools`, otherwise it ends the graph.
 
 ### 3.5 Chunking Middleware
 
@@ -145,13 +144,42 @@ The system prompt is assembled dynamically by `build_system_prompt()` in `agent/
 
 **Solution**: `ChunkingMiddleware` (`services/chunking.py`) wraps the LangGraph `ToolNode`. After tool execution, any `ToolMessage` whose content exceeds `CHUNK_TOKEN_BUDGET` tokens is:
 
-1. **Persisted in full** to DynamoDB (+ S3 if the raw content exceeds 100KB).
-2. **Split** into chunks of approximately `CHUNK_TOKEN_BUDGET` tokens each, with boundaries snapped to newlines so no line is split across chunks.
+1. **Persisted in full** to DynamoDB (+ S3 if the raw content exceeds 100KB). When offloaded to S3, each chunk is also uploaded as a separate object (`results/{session_id}/{result_id}/chunk_{N}.txt`) alongside the full blob, enabling efficient per-chunk retrieval without downloading the entire result.
+2. **Split** into chunks of approximately `CHUNK_TOKEN_BUDGET` tokens each (with a 10% safety margin to account for non-uniform token density). Chunk boundaries are snapped to newlines when possible, then to word boundaries (spaces) as a fallback; content with neither (e.g. base64 or minified JSON) is split at exact character offsets.
 3. **Replaced** in the message stream with chunk 1 plus a metadata annotation: `[Chunked: result_id=<id>, chunk 1/N, ...]`.
 
-The agent retrieves subsequent chunks on demand via `session_manager(action='get_chunk', result_id=<id>, chunk_index=N)`. This replaces the earlier summarize-node approach, preserving full data fidelity instead of producing a lossy LLM summary.
+The agent retrieves subsequent chunks on demand via `session_manager(action='get_chunk', result_id=<id>, chunk_index=N)`. When per-chunk S3 objects are available (`s3_chunk_prefix` is set on the `ToolResult`), retrieval fetches only the requested chunk object directly from S3 instead of downloading and re-slicing the full blob. A backward-compatible fallback handles older results that lack per-chunk storage.
+
+The entire persistence path (S3 upload + DynamoDB store) is wrapped in error handling: on failure, any partially uploaded S3 objects are cleaned up and the original unmodified `ToolMessage` is returned to the agent so the conversation continues gracefully.
 
 Configured via `CHUNK_TOKEN_BUDGET` (default 10,000).
+
+**Chunking Pipeline:**
+
+```mermaid
+flowchart TD
+    ToolExec["Tool executes via ToolNode"] --> CheckSize{"Token count ><br/>CHUNK_TOKEN_BUDGET?"}
+    CheckSize -->|No| PassThrough["Return ToolMessage as-is"]
+    CheckSize -->|Yes| EstimateChunkSize["Estimate chunk_size_chars<br/>via token-to-char ratio<br/>with 10% safety margin"]
+    EstimateChunkSize --> ComputeBoundaries["Compute chunk boundaries:<br/>snap to newlines > spaces > exact offset"]
+    ComputeBoundaries --> CheckS3{"Byte size ><br/>S3_OFFLOAD_THRESHOLD?"}
+    CheckS3 -->|Yes| S3Upload["Upload full blob to S3<br/>+ per-chunk objects<br/>chunk_0.txt, chunk_1.txt, ..."]
+    CheckS3 -->|No| DynamoOnly["Store full content<br/>in DynamoDB item"]
+    S3Upload --> StoreMeta["Store ToolResult metadata in DynamoDB<br/>s3_key, s3_chunk_prefix,<br/>total_chunks, chunk_size_chars"]
+    DynamoOnly --> StoreMeta
+    StoreMeta --> ReplaceMsg["Replace ToolMessage with:<br/>annotation header + chunk 1 content"]
+    ReplaceMsg --> AgentContinues["Agent receives chunked message"]
+    AgentContinues --> NeedMore{"Agent needs<br/>more chunks?"}
+    NeedMore -->|Yes| GetChunk["session_manager<br/>action=get_chunk<br/>chunk_index=N"]
+    GetChunk --> ChunkRetrieval{"s3_chunk_prefix<br/>exists?"}
+    ChunkRetrieval -->|Yes| S3Direct["Fetch chunk_N.txt<br/>directly from S3"]
+    ChunkRetrieval -->|No| Recompute["Download full blob<br/>and re-slice in memory"]
+    S3Direct --> AgentContinues
+    Recompute --> AgentContinues
+    NeedMore -->|No| Done["Agent produces final response"]
+```
+
+The diagram above shows the full lifecycle: the `ChunkingMiddleware` intercepts large `ToolMessage`s after tool execution, persists them, and replaces the message with chunk 1. On subsequent turns, the agent retrieves additional chunks on demand via `session_manager(action='get_chunk')`, with per-chunk S3 objects enabling O(chunk_size) retrieval.
 
 ### 3.6 Data Analysis Tool
 
@@ -174,9 +202,8 @@ Users can attach CSV or PDF files via the frontend (paperclip button in the mess
 router ─► [first turn] ─► plan ─► agent
        └► [subsequent] ────────► agent
 
-agent ─► [tool calls] ─► tools (ChunkingMiddleware) ─► evaluate ─► agent
-
-agent ─► [no tool calls] ─► END
+agent ─► [tool calls] ─► tools (ChunkingMiddleware) ─► agent
+       └► [no tool calls] ─► END
 ```
 
 ### 3.8 Pluggable LLM Provider
@@ -206,7 +233,7 @@ SSE was chosen over WebSockets because:
 ### 3.10 LangGraph over Plain LangChain Chains
 
 LangGraph provides:
-- Explicit graph-based control flow (agent → tools → evaluate → agent).
+- Explicit graph-based control flow (agent → tools → agent loop).
 - Native support for conditional edges (the routing logic).
 - Clean separation of concerns: each node is independently testable.
 - Stream mode `updates` allows us to emit SSE events as each node completes.
@@ -242,9 +269,10 @@ The trade-off is that cross-session queries (e.g., "find all sessions") require 
 | S3 offloading for large results | Bypasses DynamoDB 400KB item limit, enables presigned download URLs | Additional service dependency, eventual consistency for reads |
 | tiktoken for token counting | Accurate token counts for OpenAI models | Falls back to `len/4` heuristic for non-OpenAI providers |
 | Chunking over LLM summarization | Preserves full data fidelity; agent retrieves exact chunks on demand | Requires multiple round-trips for large results; more tool calls |
+| Per-chunk S3 storage | O(chunk_size) retrieval per `get_chunk` call instead of O(total_size); no re-computation of chunk boundaries on read | Doubles S3 storage for chunked results (full blob + individual chunk objects) |
 | Context compaction (strip + summarize) | Keeps context within budget while preserving result_id references | Old messages lose detail; agent must re-fetch data via `get_chunk` |
 | First-turn planning node | Better tool usage on complex first questions | Adds latency to the first response in a session |
-| Simplified evaluate node (no LLM call) | Halves API calls per tool loop; avoids rate-limit issues | Agent may loop unnecessarily if it misinterprets tool results |
+| Direct tools-to-agent edge (no evaluate node) | Halves API calls per tool loop; avoids rate-limit issues; simpler graph | Agent may loop unnecessarily if it misinterprets tool results |
 | Server-side data_analysis tool | Avoids loading full files into context window; accurate pandas computations | Limited to pandas operations; requires server-side file access |
 | File upload via S3 | Users can attach CSV/PDF files for agent processing | Requires S3 bucket configuration; 50 MB file size limit |
 
@@ -253,11 +281,11 @@ The trade-off is that cross-session queries (e.g., "find all sessions") require 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Session Manager tool (store/retrieve/list/download/get_chunk) | Implemented | Full CRUD + chunk retrieval with S3 offloading for large results |
-| Auto-chunking of large tool results | Implemented | `ChunkingMiddleware` wraps tool node; persists full result, sends chunk 1 to agent |
+| Auto-chunking of large tool results | Implemented | `ChunkingMiddleware` wraps tool node; persists full result + per-chunk S3 objects, sends chunk 1 to agent; graceful fallback on persistence failure |
 | Context window management (compaction) | Implemented | `compact_chunked_messages()` with tiktoken counting; strips old chunk data, summarizes old messages |
 | Dynamic prompt builder | Implemented | Assembles system prompt from tool instructions and chunking instructions |
 | Planning node (first-turn strategy) | Implemented | Internal bullet-point plan on first turn before agent acts |
-| Evaluation node (loop control) | Implemented | Post-tool passthrough; always routes back to agent (no LLM call) |
+| Tool loop (direct edge back to agent) | Implemented | Static edge from tools to agent; agent LLM decides when to stop |
 | Data analysis tool | Implemented | Server-side pandas analysis (describe, aggregate, query, filter, search, value_counts) |
 | File upload (CSV/PDF) | Implemented | Frontend paperclip button; backend uploads to S3; agent processes via file_source or data_analysis |
 | Database query tool | Implemented | Read-only SQL against SQLite (demo) |

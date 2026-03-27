@@ -49,17 +49,3 @@ def plan_node(state: AgentState) -> dict[str, Any]:
 
     plan_msg = SystemMessage(content=f"Internal plan:\n{plan_content}")
     return {"messages": [plan_msg]}
-
-
-# ── Evaluation node ────────────────────────────────────────────────────
-
-
-def evaluate_node(state: AgentState) -> dict[str, Any]:
-    """Always route back to the agent after a tool result.
-
-    The agent LLM itself decides whether it has enough information to respond
-    or needs additional tool calls.  Skipping the separate evaluation LLM call
-    halves API usage per loop iteration, which is critical for Tier 1 rate
-    limits.
-    """
-    return {"_eval_route": "agent"}

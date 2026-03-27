@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from agent.llm_factory import create_llm
-from agent.nodes import evaluate_node, plan_node
+from agent.nodes import plan_node
 from agent.prompt_builder import build_system_prompt
 from agent.state import AgentState
 from config import get_settings
@@ -69,7 +69,6 @@ def build_graph() -> StateGraph:
     graph.add_node("plan", plan_node)
     graph.add_node("agent", _agent_node)
     graph.add_node("tools", chunked_tools)
-    graph.add_node("evaluate", evaluate_node)
 
     graph.set_entry_point("router")
     graph.add_node("router", lambda state: {})
@@ -81,11 +80,6 @@ def build_graph() -> StateGraph:
 
     graph.add_edge("plan", "agent")
     graph.add_conditional_edges("agent", _route_after_agent, {"tools": "tools", END: END})
-    graph.add_edge("tools", "evaluate")
-    graph.add_conditional_edges(
-        "evaluate",
-        lambda state: state.get("_eval_route", "agent"),
-        {"agent": "agent", END: END},
-    )
+    graph.add_edge("tools", "agent")
 
     return graph.compile()

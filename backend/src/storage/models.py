@@ -20,6 +20,7 @@ class ToolResult(BaseModel):
     summary: str
     full_result: str = ""
     s3_key: str | None = None
+    s3_chunk_prefix: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
     size_bytes: int = 0

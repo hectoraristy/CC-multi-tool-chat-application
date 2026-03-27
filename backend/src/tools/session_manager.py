@@ -25,6 +25,8 @@ def _handle_store(
     summary: str,
     **_: Any,
 ) -> str:
+    from services.chunking import _compute_line_chunks, _estimate_chunk_size_chars
+
     for text in (content, summary):
         match = RESULT_ID_RE.search(text)
         if match:
@@ -43,16 +45,31 @@ def _handle_store(
 
     rid = result_id or str(uuid.uuid4())
     truncated_summary = summary or content[:500]
+    byte_size = len(content.encode("utf-8"))
 
     s3_key: str | None = None
+    s3_chunk_prefix: str | None = None
     stored_content = content
 
     s3 = get_s3_store()
-    if s3 is not None and len(content.encode("utf-8")) > S3_OFFLOAD_THRESHOLD:
+    if s3 is not None and byte_size > S3_OFFLOAD_THRESHOLD:
         s3_key = S3ResultStore.make_key(session_id, rid)
         s3.upload_result(s3_key, content)
         stored_content = ""
         logger.info("Offloaded large result %s to S3 key %s", rid, s3_key)
+
+    settings = get_settings()
+    model = settings.openai_model if settings.llm_provider == "openai" else ""
+    chunk_size_chars = _estimate_chunk_size_chars(content, settings.chunk_token_budget, model)
+    boundaries = _compute_line_chunks(content, chunk_size_chars)
+    total_chunks = len(boundaries) if len(boundaries) > 1 else 0
+
+    if total_chunks > 0 and s3 is not None and s3_key:
+        s3_chunk_prefix = f"results/{session_id}/{rid}/chunk_"
+        for i, (start, end) in enumerate(boundaries):
+            chunk_key = S3ResultStore.make_chunk_key(session_id, rid, i)
+            s3.upload_result(chunk_key, content[start:end])
+        logger.info("Uploaded %d chunk objects for result %s", total_chunks, rid)
 
     result = ToolResult(
         session_id=session_id,
@@ -61,7 +78,10 @@ def _handle_store(
         summary=truncated_summary,
         full_result=stored_content,
         s3_key=s3_key,
-        size_bytes=len(content.encode("utf-8")),
+        s3_chunk_prefix=s3_chunk_prefix,
+        size_bytes=byte_size,
+        total_chunks=total_chunks,
+        chunk_size_chars=chunk_size_chars if total_chunks > 0 else 0,
         metadata={"source_tool": tool_name},
     )
     store.store_tool_result(result)
@@ -169,20 +189,30 @@ def _handle_get_chunk(
             f"Valid range: 0 to {result.total_chunks - 1}."
         )
 
-    if result.full_result:
-        full_content = result.full_result
-    elif result.s3_key:
+    if result.s3_chunk_prefix:
         s3 = get_s3_store()
         if s3 is not None:
-            full_content = s3.download_result(result.s3_key)
+            chunk_key = f"{result.s3_chunk_prefix}{chunk_index}.txt"
+            chunk = s3.download_result(chunk_key)
         else:
-            return f"Cannot retrieve content — S3 storage is not available."
+            return "Cannot retrieve content — S3 storage is not available."
+    elif result.full_result:
+        from services.chunking import get_content_chunk
+
+        chunk = get_content_chunk(result.full_result, chunk_index, result.chunk_size_chars)
+    elif result.s3_key:
+        # Backward compatibility: old results without per-chunk S3 objects
+        s3 = get_s3_store()
+        if s3 is not None:
+            from services.chunking import get_content_chunk
+
+            full_content = s3.download_result(result.s3_key)
+            chunk = get_content_chunk(full_content, chunk_index, result.chunk_size_chars)
+        else:
+            return "Cannot retrieve content — S3 storage is not available."
     else:
         return f"No content available for result '{result_id}'."
 
-    from services.chunking import get_content_chunk
-
-    chunk = get_content_chunk(full_content, chunk_index, result.chunk_size_chars)
     return (
         f"[Chunk {chunk_index + 1}/{result.total_chunks} of result {result_id}]\n\n"
         f"{chunk}"
